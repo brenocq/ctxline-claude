@@ -183,12 +183,12 @@ function runUninstall() {
     } catch (e) {}
   }
 
-  // 4. Clear the per-transcript token counts (best-effort)
+  // 4. Clear the per-transcript subagent cost state (best-effort)
   const tokensDir = path.join(claudeDir, 'cache', 'tokens');
   if (fs.existsSync(tokensDir)) {
     try {
       fs.rmSync(tokensDir, { recursive: true, force: true });
-      console.log(`${green}✓ Cleared token cache${reset}`);
+      console.log(`${green}✓ Cleared subagent cost cache${reset}`);
     } catch (e) {}
   }
 

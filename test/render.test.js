@@ -146,7 +146,7 @@ const BOLD = '\x1b[1m';
 // child process. What's left spawned: git-branch/ahead-behind detection (real .git dir +
 // subprocess), the usage cache/API pipeline, CTXLINE_DISABLE env-parsing (module-load-time
 // state, needs a fresh process per value), and the execution-contract tests below.
-const { parseScopedLimits, parseUsagePayload, readStdinThen, renderStatusLine, renderSubagentTask, compareVersions, parseRegistryVersion, isReleaseBody, VERSION } = require('../statusline.js');
+const { parseScopedLimits, parseUsagePayload, readStdinThen, renderStatusLine, renderSubagentTask, renderContextBar, compareVersions, parseRegistryVersion, isReleaseBody, VERSION } = require('../statusline.js');
 
 // Same shape as fixture()'s stdin JSON, but as a plain object (no JSON round-trip needed
 // for a direct call).
@@ -170,7 +170,7 @@ test('line assembly: dir basename | model | context, separated by │', () => {
   const parts = clean.split(' │ ');
   assert.strictEqual(parts[0], 'cool-project');        // basename only
   assert.strictEqual(parts[1], 'Sonnet 4.6');          // model passes through
-  assert.match(parts[2], /^C\d+ /);                    // compact context label "C60 ███░░░"
+  assert.match(parts[2], /^C\d+ /);                    // compact context label "C60 ⠿⠿⠿⠀⠀⠀"
 });
 
 test('model name drops the context suffix: "Opus 5.5 (1M context)" -> "Opus 5.5"', () => {
@@ -299,6 +299,38 @@ test('cost renders after usage and before task', () => {
 test('context bar shows used% = 100 - remaining', () => {
   const { clean } = render(dataObj(65), plainFacts());
   assert.match(clean, /C35 /);                    // remaining 65 -> used 35 -> "C35 <bar>"
+});
+
+// The bar: 6 braille cells, each filled dot by dot (⠀⠁⠃⠇⠏⠟⠿), 36 steps over the window.
+const barOf = (used) => renderContextBar(used).replace(/\x1b\[[0-9;]*m/g, '').split(' ')[1];
+
+test('context bar: empty at 0%, full at 100%, six cells always', () => {
+  assert.strictEqual(barOf(0), '⠀⠀⠀⠀⠀⠀');
+  assert.strictEqual(barOf(100), '⠿⠿⠿⠿⠿⠿');
+  for (let used = 0; used <= 100; used++) assert.strictEqual([...barOf(used)].length, 6, `width at ${used}%`);
+});
+
+test('context bar: fills one dot per 1/36 of the window, left column first', () => {
+  const steps = ['⠀', '⠁', '⠃', '⠇', '⠏', '⠟', '⠿'];
+  for (let dots = 0; dots <= 36; dots++) {
+    const used = (dots / 36) * 100;
+    const full = Math.floor(dots / 6);
+    const want = '⠿'.repeat(full) + (full < 6 ? steps[dots % 6] + '⠀'.repeat(5 - full) : '');
+    assert.strictEqual(barOf(used), want, `${dots} dots`);
+  }
+  assert.strictEqual(barOf(24), '⠿⠇⠀⠀⠀⠀'); // 24% -> 8.64 -> 9 dots: one full cell, then 3
+});
+
+test('context bar: over 100% or below 0% stays within the bar', () => {
+  assert.strictEqual(barOf(130), '⠿⠿⠿⠿⠿⠿');
+  assert.strictEqual(barOf(-5), '⠀⠀⠀⠀⠀⠀');
+});
+
+test('context bar: label and bar share the threshold color', () => {
+  assert.ok(renderContextBar(10).startsWith(`${GREEN}C10 `));
+  assert.ok(renderContextBar(55).startsWith(`${YELLOW}C55 `));
+  assert.ok(renderContextBar(70).startsWith(`${ORANGE}C70 `));
+  assert.ok(renderContextBar(85).startsWith(`${RED}C85 `));
 });
 
 test('threshold: used < 50 is green', () => {
