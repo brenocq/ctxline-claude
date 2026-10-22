@@ -92,7 +92,7 @@ Then add both entries to `~/.claude/settings.json`. The second one draws a row p
 | `W` Weekly | Weekly usage limit and reset countdown |
 | Model limit | Weekly limit for one model, if your account has one, labeled by the model's initial (`F` = Fable) |
 | `$` Cost | Session cost in USD |
-| Subagent rows | One row per running subagent: the short description it was spawned with, model and effort, its context bar, how long it has run, and what it has cost so far in dollars |
+| Subagent rows | One row per running subagent: the short description it was spawned with, bold in the agent's own color, what it is doing now (cut to fit the terminal), model and effort, its context bar, how long it has run, and what it has cost so far in dollars |
 | Task | The in-progress todo |
 
 Segments past model and context appear only when there is data for them. Usage limits show for Pro/Max subscriptions only. Bars change color as you near a limit. On a narrow terminal the line wraps to two (needs Claude Code v2.1.153+).
@@ -232,6 +232,17 @@ No, if you're on Pro or Max. It's what the session would cost at API prices, as 
 <summary>Where does a subagent's cost come from?</summary>
 
 From the transcript Claude Code keeps for each subagent, read on your machine only; each render reads just the lines added since the last one. Every reply is priced with the rates Claude Code itself uses for the session cost. It can still come out a little lower than Claude Code's own figure: transcripts log a reply's output before it finishes, so output is counted from the text, tool calls and thinking the reply shows, and thinking the model kept hidden is not counted.
+
+</details>
+
+<details>
+<summary>Where does a subagent's color come from?</summary>
+
+From `~/.claude/agent-colors.json`, which the `agent-color` script keeps: `agent-color "<description>"` prints the agent's color (`#rrggbb`), giving it the palette color least used in the last 24 hours when it has none, and forgets agents after 7 days. Run it when spawning an agent to use the same color elsewhere, such as in the chat. The status line only reads the file; an agent missing from it gets a color picked from its name. Install the script beside the status line:
+
+```bash
+cp agent-color.js ~/.claude/hooks/agent-color && chmod +x ~/.claude/hooks/agent-color
+```
 
 </details>
 

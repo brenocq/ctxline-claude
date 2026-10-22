@@ -199,8 +199,8 @@ function renderSubagentPanel(tasks) {
 console.log('\nSubagent panel (2 running tasks):');
 const nowSecPanel = Math.floor(Date.now() / 1000);
 for (const line of renderSubagentPanel([
-  { id: 't1', name: 'reviewer', model: 'claude-opus-5', effort: 'high', tokenCount: 45200, contextWindowSize: 200000, startTime: nowSecPanel - 252 },
-  { id: 't2', name: 'explorer', model: 'claude-sonnet-5', tokenCount: 12400, contextWindowSize: 200000, startTime: nowSecPanel - 15 }
+  { id: 't1', description: 'Review the parser', label: 'Reading src/parser.js', name: 'reviewer', model: 'claude-opus-5', effort: 'high', tokenCount: 45200, contextWindowSize: 200000, startTime: nowSecPanel - 252 },
+  { id: 't2', description: 'Find flaky tests', name: 'explorer', model: 'claude-sonnet-5', tokenCount: 12400, contextWindowSize: 200000, startTime: nowSecPanel - 15 }
 ])) {
   console.log('  ' + line);
 }

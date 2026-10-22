@@ -117,11 +117,11 @@ test('cost: a subagent row ends with its dollars, dim; "…" while catching up; 
 
 // ── row name ──
 
-test('subagent name: the spawn description, not the live activity label', () => {
+test('subagent name: the spawn description, then the live activity label beside it', () => {
   const row = (t) => clean(renderSubagentTask({ id: 't', ...t }));
-  assert.strictEqual(row({ description: 'Reply colors plugin', label: 'Waiting on the build', name: 'colors' }), 'Reply colors plugin');
-  assert.strictEqual(row({ name: 'colors', label: 'Waiting on the build' }), 'colors');
-  assert.strictEqual(row({ label: 'Waiting on the build' }), 'Waiting on the build');
+  assert.strictEqual(row({ description: 'Reply colors plugin', label: 'Waiting on the build', name: 'colors' }), 'Reply colors plugin │ Waiting on the build');
+  assert.strictEqual(row({ name: 'colors', label: 'Waiting on the build' }), 'colors │ Waiting on the build');
+  assert.strictEqual(row({ label: 'Waiting on the build' }), 'agent │ Waiting on the build');
   assert.strictEqual(row({}), 'agent');
 });
 

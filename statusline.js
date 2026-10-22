@@ -69,6 +69,17 @@ const SEMVER_RE = /^\d+\.\d+\.\d+$/;       // releases only: a prerelease never 
 // Subagent mode reads only stdin (no fetch to race), so its read gets its own short cap.
 const SUBAGENT_TIMEOUT_MS = 500;
 
+// Each subagent's name is drawn in its own color: the one `agent-color` (agent-color.js, installed
+// beside this file) assigned it in AGENT_COLORS_FILE, read here only, never written; an agent
+// missing from it gets a stable hash of its name into the palette. Mirrors PALETTE in
+// agent-color.js (a test keeps them equal).
+const AGENT_COLORS_FILE = path.join(os.homedir(), '.claude', 'agent-colors.json');
+const AGENT_PALETTE = ['#5bb8f5', '#c78bf0', '#3fc9b0', '#f4a582', '#7b8cff', '#d8c8a0', '#a8e6ef', '#c2b5f7'];
+// A subagent row's live activity is cut to fit the terminal; with no known width, to this.
+const ACTIVITY_MAX = 48;
+// Cells the agent panel draws before each row (its own bullet and indent).
+const SUBAGENT_ROW_INDENT = 4;
+
 // Each subagent's cost, from its transcript (<session>/subagents/agent-<id>.jsonl beside stdin's
 // transcript_path). Read from where the last render stopped, the offset and running total kept
 // per file; at most COST_MAX_READ per render, so a first read of a long transcript never stalls
@@ -1140,13 +1151,55 @@ function formatElapsed(startTime) {
   return `${secs}s`;
 }
 
-// One subagentStatusLine row: "name │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ $<cost>".
-// name is the description the agent was spawned with ("Reply colors plugin"); `label` is its
-// live activity, used only when there is no description. Every segment past name is conditional
-// on its source being present/finite. `cost` is the subagent's readAgentCost(), read by
-// emitSubagent; absent -> no cost segment.
-function renderSubagentTask(t, cost) {
-  const parts = [t.description || t.name || t.label || 'agent'];
+// "#5bb8f5" -> the 24-bit foreground escape for it.
+function hexToAnsi(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return `\x1b[38;2;${(n >> 16) & 255};${(n >> 8) & 255};${n & 255}m`;
+}
+
+// Stable palette color for an agent missing from the registry: FNV-1a of its name.
+function agentHashColor(name) {
+  let h = 0x811c9dc5;
+  for (const byte of Buffer.from(String(name), 'utf8')) h = Math.imul(h ^ byte, 0x01000193) >>> 0;
+  return AGENT_PALETTE[h % AGENT_PALETTE.length];
+}
+
+// The registry `agent-color` writes; {} when missing or unreadable. Read-only.
+function readAgentColors() {
+  try {
+    const data = JSON.parse(fs.readFileSync(AGENT_COLORS_FILE, 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+// An agent's color: its registry entry when well-formed, else its hash color.
+function agentColorOf(registry, name) {
+  const color = registry?.[name]?.color;
+  return typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : agentHashColor(name);
+}
+
+// Plain text cut to `width` cells, ending in "…" when cut.
+function truncateText(text, width) {
+  const chars = [...text];
+  if (chars.length <= width) return text;
+  return chars.slice(0, Math.max(0, width - 1)).join('') + '…';
+}
+
+// One subagentStatusLine row:
+// "name │ activity │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ $<cost>".
+// name is the description the agent was spawned with ("Reply colors plugin"), bold in its color
+// (`opts.color`, from the registry; else its hash color). activity is the task's live `label`,
+// dim, cut with "…" so the row fits `opts.cols` (the terminal width) less the panel's indent, or
+// to ACTIVITY_MAX when the width is unknown; no label, or no room, drops it. Every segment past
+// name is conditional on its source being present/finite. `cost` is the subagent's
+// readAgentCost(), read by emitSubagent; absent -> no cost segment.
+function renderSubagentTask(t, cost, opts = {}) {
+  const name = String(t.description || t.name || 'agent');
+  const color = opts.color || agentHashColor(name);
+  const head = `${colors.bold}${hexToAnsi(color)}${name}${colors.reset}`;
+  const parts = [];
 
   const model = shortenModelId(t.model);
   // effort absent = subagent inherits the session effort; show model alone then.
@@ -1168,7 +1221,19 @@ function renderSubagentTask(t, cost) {
   const costSegment = renderAgentCost(cost);
   if (costSegment) parts.push(costSegment);
 
-  return parts.join(SEGMENT_SEP);
+  const activity = typeof t.label === 'string' ? t.label.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim() : '';
+  if (activity) {
+    const cols = opts.cols;
+    const room = Number.isFinite(cols) && cols > 0
+      ? cols - SUBAGENT_ROW_INDENT - WIDTH_MARGIN - visibleWidth([head, '', ...parts].join(SEGMENT_SEP))
+      : ACTIVITY_MAX;
+    // Below a few cells the cut text says nothing: leave the segment out.
+    if (room >= Math.min(4, [...activity].length)) {
+      parts.unshift(`${colors.dim}${truncateText(activity, room)}${colors.reset}`);
+    }
+  }
+
+  return [head, ...parts].join(SEGMENT_SEP);
 }
 
 // subagentStatusLine mode: one {id, content} JSON line per task. No usage/git/todos work; the
@@ -1178,9 +1243,12 @@ function emitSubagent(data) {
   try {
     const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
     const costOf = t => (DISABLED.has('cost') ? null : readAgentCost(subagentTranscript(data?.transcript_path, t)));
+    const registry = readAgentColors();
+    const cols = parseInt(process.env.COLUMNS, 10);
+    const optsOf = t => ({ color: agentColorOf(registry, String(t.description || t.name || 'agent')), cols });
     const out = tasks
       .filter(t => t && t.id)
-      .map(t => JSON.stringify({ id: t.id, content: renderSubagentTask(t, costOf(t)) }))
+      .map(t => JSON.stringify({ id: t.id, content: renderSubagentTask(t, costOf(t), optsOf(t)) }))
       .join('\n');
     if (out) {
       // Exit from the write callback: process.exit() would drop output queued behind backpressure.
@@ -1208,5 +1276,5 @@ if (require.main === module) {
     readStdinThen(timeoutMs, (input) => finish(parseInput(input)));
   }
 } else {
-  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, renderContextBar, formatUsd, usageCost, addCostLine, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
+  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, renderContextBar, agentHashColor, agentColorOf, AGENT_PALETTE, formatUsd, usageCost, addCostLine, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
 }
