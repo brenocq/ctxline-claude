@@ -1226,8 +1226,10 @@ function renderSubagentTask(t, cost, opts = {}) {
   const costSegment = renderAgentCost(cost);
   if (costSegment) parts.push(costSegment);
 
-  const activity = typeof t.label === 'string' ? t.label.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim() : '';
-  if (activity) {
+  const oneLine = s => s.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
+  const activity = typeof t.label === 'string' ? oneLine(t.label) : '';
+  // With no live activity Claude Code passes the description as the label: the name, again.
+  if (activity && activity !== oneLine(name)) {
     const cols = opts.cols;
     const room = Number.isFinite(cols) && cols > 0
       ? cols - SUBAGENT_ROW_INDENT - WIDTH_MARGIN - visibleWidth([head, '', ...parts].join(SEGMENT_SEP))
