@@ -16,8 +16,9 @@ const os = require('os');
 
 // Mirrors AGENT_PALETTE in statusline.js (a test keeps them equal). Readable on a dark terminal
 // and clear of the colors that already mean something: green (recommended), red (broken),
-// magenta/pink (pending), gray (notes), and the context bar's yellow/orange.
-const PALETTE = ['#5bb8f5', '#c78bf0', '#3fc9b0', '#f4a582', '#7b8cff', '#d8c8a0', '#a8e6ef', '#c2b5f7'];
+// magenta/pink (pending), gray (notes), the context bar's yellow/orange, and the orchestrator's
+// own blue (#5bb8f5), which only the main session's question and review blocks use.
+const PALETTE = ['#c78bf0', '#3fc9b0', '#f4a582', '#7b8cff', '#d8c8a0', '#a8e6ef', '#c2b5f7'];
 
 const RECENT_MS = 24 * 60 * 60 * 1000;   // window counted when picking the least-used color
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;  // entries older than this are dropped
@@ -35,7 +36,8 @@ function assignedAt(entry) {
 }
 
 // Pure: the registry after looking up (or assigning) `name` at `now`, and the name's color.
-// Entries that are malformed or older than KEEP_MS are dropped first.
+// Entries that are malformed or older than KEEP_MS are dropped first; `name`'s own entry is
+// reassigned when its color is no longer in PALETTE.
 function assignColor(registry, name, now = Date.now()) {
   const kept = {};
   for (const [key, entry] of Object.entries(registry || {})) {
@@ -43,7 +45,11 @@ function assignColor(registry, name, now = Date.now()) {
     if (t === null || !HEX_RE.test(entry.color) || now - t > KEEP_MS) continue;
     kept[key] = entry;
   }
-  if (kept[name]) return { registry: kept, color: kept[name].color.toLowerCase() };
+  // A color the palette no longer holds is reassigned when its agent is next asked for; other
+  // agents' retired entries keep theirs until then, so a running agent's row doesn't change color.
+  if (kept[name] && PALETTE.includes(kept[name].color.toLowerCase())) {
+    return { registry: kept, color: kept[name].color.toLowerCase() };
+  }
 
   const uses = new Map(PALETTE.map(c => [c, 0]));
   for (const entry of Object.values(kept)) {
