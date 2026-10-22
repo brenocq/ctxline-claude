@@ -187,6 +187,15 @@ test('row: no activity -> no segment; no color given -> the hash color', () => {
   }
 });
 
+test('row: activity equal to the name (no live activity) -> the name once', () => {
+  for (const label of ['Agent colors', '  Agent   colors\n']) {
+    const row = clean(renderSubagentTask({ ...task, label }));
+    assert.deepStrictEqual(row.split(' │ ').slice(0, 2), ['Agent colors', 'Opus 5.5 · high'], JSON.stringify(label));
+  }
+  const other = clean(renderSubagentTask({ ...task, label: 'Agent colors test' }));
+  assert.deepStrictEqual(other.split(' │ ').slice(0, 3), ['Agent colors', 'Agent colors test', 'Opus 5.5 · high']);
+});
+
 test('row: activity is cut with "…" so the row fits the width, panel indent included', () => {
   const label = 'Reading statusline.js to find where the subagent row is drawn and how wide it is';
   const full = clean(renderSubagentTask({ ...task, label }, null, { cols: 500 }));
