@@ -16,7 +16,8 @@ const IS_API_KEY = !!process.env.ANTHROPIC_API_KEY;
 
 // Segment opt-out: comma list. Recognized: branch, effort, cost, task, update, autoupdate, usage.
 // Disabling skips the work, not just the output; dir/model/context always render.
-// autoupdate: no self-install, the "available" row stays; update: no check at all.
+// autoupdate: no self-install, the "available" row stays (the fork never self-installs, see
+// SELF_INSTALL); update: no check at all.
 const DISABLED = new Set(
   (process.env.CTXLINE_DISABLE || '')
     .split(',')
@@ -62,6 +63,9 @@ const REGISTRY_HOST = 'registry.npmjs.org';
 const RELEASE_HOST = 'raw.githubusercontent.com';
 const RELEASE_REPO = 'MithunWijayasiri/ctxline-claude';
 const PACKAGE_NAME = 'ctxline-claude';
+// Off on the fork: a release comes from upstream and would replace the fork's hook. The check
+// still runs, so the "available" row says when upstream moved.
+const SELF_INSTALL = false;
 // Self-install only over the installed hook — never a working-tree copy under local testing.
 const HOOK_FILE = path.join(os.homedir(), '.claude', 'hooks', 'statusline.js');
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;       // releases only: a prerelease never nudges
@@ -665,7 +669,7 @@ function runUpdateCheck() {
       process.exit(0);
     };
 
-    if (compareVersions(latest, VERSION) !== 1 || DISABLED.has('autoupdate') || !isInstalledHook()) {
+    if (compareVersions(latest, VERSION) !== 1 || !SELF_INSTALL || DISABLED.has('autoupdate') || !isInstalledHook()) {
       return stamp({ checkedAt: Date.now() });
     }
     httpsGet(RELEASE_HOST, `/${RELEASE_REPO}/v${latest}/statusline.js`, (body) => {
@@ -1018,12 +1022,13 @@ function collectFacts(data) {
   }
 }
 
-// Own stdout row, not a segment: the copy-pasteable command is too wide to inline without
-// forcing a wrap. Appended after layout() so it never joins the wrap decision.
+// Own stdout row, not a segment: too wide to inline without forcing a wrap. Appended after
+// layout() so it never joins the wrap decision. The fork names the merge, not `npx`, which
+// would install upstream over it.
 function renderUpdateLine(latest) {
-  return `${colors.green}⬆ ${latest}${colors.reset} `
+  return `${colors.green}⬆ upstream ${latest}${colors.reset} `
     + `${colors.dim}available ·${colors.reset} `
-    + `${colors.bold}npx ${PACKAGE_NAME}@latest${colors.reset}`;
+    + `${colors.bold}merge into breno-dev${colors.reset}`;
 }
 
 function renderUpdatedLine({ from, to }) {
