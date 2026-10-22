@@ -94,7 +94,7 @@ Then add both entries to `~/.claude/settings.json`. The second one draws a row p
 | `W` Weekly | Weekly usage limit and reset countdown |
 | Model limit | Weekly limit for one model, if your account has one, labeled by the model's initial (`F` = Fable) |
 | `$` Cost | Session cost in USD |
-| Subagent rows | One row per running subagent: the short description it was spawned with, bold in the agent's own color, what it is doing now (cut to fit the terminal), model and effort, its context bar, how long it has run, and what it has cost so far in dollars |
+| Subagent rows | One row per running subagent: the short description it was spawned with, bold in the agent's own color, what it is doing now (cut to fit the terminal), model and effort, its context bar, how long it has run, and what it has cost so far in dollars, every column lined up across the rows |
 | Task | The in-progress todo |
 
 Segments past model and context appear only when there is data for them. Usage limits show for Pro/Max subscriptions only. Bars change color as you near a limit. On a narrow terminal the line wraps to two (needs Claude Code v2.1.153+).

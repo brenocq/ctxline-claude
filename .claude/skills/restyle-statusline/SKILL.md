@@ -9,7 +9,7 @@ description: Change the statusline's visible design — layout, segment format, 
 
 | File | Where |
 |---|---|
-| `statusline.js` | `renderContextBar`, `getContextBar`, `renderSubagentTask`, `buildUsageBar`, `buildUsageBars`, `formatAheadBehind`, `getCostSegment`, `renderAgentCost`, `formatUsd`, `formatTokenCount`, `readTokenTotals`, `subagentTranscript`, `getUpdateFacts`, `renderUpdateLine`, `renderUpdatedLine`, `layout`, `collectFacts`, `renderStatusLine`, `outputStatus`, `outputFallback` |
+| `statusline.js` | `renderContextBar`, `getContextBar`, `renderSubagentRows`, `renderSubagentTask`, `buildUsageBar`, `buildUsageBars`, `formatAheadBehind`, `getCostSegment`, `renderAgentCost`, `formatUsd`, `formatTokenCount`, `readTokenTotals`, `subagentTranscript`, `getUpdateFacts`, `renderUpdateLine`, `renderUpdatedLine`, `layout`, `collectFacts`, `renderStatusLine`, `outputStatus`, `outputFallback` |
 | `test/render.test.js` | label regexes (e.g. `/C\d+ /`, `/H\d+\b/`) |
 | `scripts/preview.js` | cache seed via `test/fixture.js`'s `seedUsageCache`; `render()` params (`columns`, `disable`) |
 | `docs/assets/preview.svg` | only 2 of 12 `<text>` elements generated (main statusline + subagent row); other 10 (window chrome, prompt lines, bullets) hand-authored |
@@ -29,7 +29,7 @@ dir ⎇ branch ↑N↓M │ model · effort │ C45 ⠿⠿⠏⠀⠀⠀ │ H14 �
 - Labels live INSIDE the builder functions (`renderContextBar`/`buildUsageBar`), not as prefixes in `renderStatusLine`. `renderStatusLine` pushes segments verbatim; `outputStatus`/`outputFallback` are thin writers that call it.
 - `↑N↓M` is appended to the branch string (↑ green / ↓ red), not a separate segment. Zero side omitted.
 - `$<cost>` is dim, sits after usage and before task.
-- Subagent rows end with their cost (`$0.42`, dim, `…` while catching up); the main line has no token segment.
+- Subagent rows end with their cost (`$0.42`, dim, `…` while catching up); the main line has no token segment. The rows are one table (`SUBAGENT_COLUMNS` in `renderSubagentRows`): a new segment is a new column there, with its alignment.
 - The `⬆` row is **not a segment**. `renderUpdateLine(latest)` builds it and `renderStatusLine` appends it after `layout()`, so it never affects wrap math. Green `⬆ <version>`, dim `available ·`, bold command. Conditional and rare — only when `update-cache.json` holds a `latest` strictly newer than `VERSION`. Cache-only on the render path; the fetch runs in the detached `update-check` entry point.
 - Self-install variant of the same row: `renderUpdatedLine({ from, to })` — green `⬆ ctxline updated`, dim `<from> →`, bold `<to>`. Shown instead of the nudge when the cache's `updatedTo` equals `VERSION`, for `UPDATED_NOTICE_MS` (5s) from the first render that shows it (`updatedShownAt`, stamped by `getUpdateFacts`).
 - Consts: `BAR_WIDTH` 6 (bar cells), `SEGMENT_SEP` `' │ '`, `MAX_BRANCH_LEN` 24, `WIDTH_MARGIN` 0.
@@ -74,7 +74,7 @@ Adding or moving a segment means picking its line in `renderStatusLine`, not jus
 | usage `H`/`W` (`getUsageColor`) | green <60 / yellow <80 / orange <90 / red ≥90 |
 | model-scoped bars (`getScopedColor`) | orange < 90 / red ≥90 — passed as `buildUsageBar`'s optional 4th arg |
 
-Context bands live in `renderContextBar`, not `getContextBar` — the latter only clamps remaining→used and delegates. `renderSubagentTask` calls the same function, so changing the bands recolors every subagent row too.
+Context bands live in `renderContextBar`, not `getContextBar` — the latter only clamps remaining→used and delegates. `renderSubagentRows` calls the same function, so changing the bands recolors every subagent row too.
 
 Scoped bars are deliberately flat so a line carrying `H W O F` reads as two groups, not four severities; red ≥90 is the one exception, for a cap about to block its model. Restoring full threshold color means dropping that 4th arg — and updating the two scoped-color tests.
 

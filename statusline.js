@@ -991,9 +991,23 @@ function renderAgentCost(cost) {
   return `${colors.dim}${formatUsd(cost.usd)}${cost.partial ? '…' : ''}${colors.reset}`;
 }
 
-// Visible (printable) width of a segment string: strip ANSI color codes, count code points.
+// Terminal cells one code point takes: 0 for combining marks, joiners and variation selectors,
+// 2 for East Asian wide/fullwidth characters and emoji, 1 otherwise.
+function charWidth(ch) {
+  const cp = ch.codePointAt(0);
+  if ((cp >= 0x300 && cp <= 0x36f) || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0;
+  if ((cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe30 && cp <= 0xfe4f) ||
+      (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1f64f) ||
+      (cp >= 0x1f900 && cp <= 0x1faff) || (cp >= 0x20000 && cp <= 0x3fffd)) return 2;
+  return 1;
+}
+
+// Visible (printable) width of a segment string in terminal cells, ANSI color codes stripped.
 function visibleWidth(str) {
-  return [...str.replace(/\x1b\[[0-9;]*m/g, '')].length;
+  let width = 0;
+  for (const ch of str.replace(/\x1b\[[0-9;]*m/g, '')) width += charWidth(ch);
+  return width;
 }
 
 // Two lines only when cols is known (COLUMNS, set by Claude Code v2.1.153+) and the single
@@ -1191,76 +1205,125 @@ function agentColorOf(registry, name) {
 
 // Plain text cut to `width` cells, ending in "…" when cut.
 function truncateText(text, width) {
-  const chars = [...text];
-  if (chars.length <= width) return text;
-  return chars.slice(0, Math.max(0, width - 1)).join('') + '…';
+  if (visibleWidth(text) <= width) return text;
+  let out = '';
+  let used = 0;
+  for (const ch of text) {
+    const w = charWidth(ch);
+    if (used + w > width - 1) break;
+    out += ch;
+    used += w;
+  }
+  return out + '…';
 }
 
-// One subagentStatusLine row:
-// "name │ activity │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ $<cost>".
-// name is the description the agent was spawned with ("Reply colors plugin"), bold in its color
-// (`opts.color`, from the registry; else its hash color). activity is the task's live `label`,
-// dim, cut with "…" so the row fits `opts.cols` (the terminal width) less the panel's indent, or
-// to ACTIVITY_MAX when the width is unknown; no label, or no room, drops it. Every segment past
-// name is conditional on its source being present/finite. `cost` is the subagent's
-// readAgentCost(), read by emitSubagent; absent -> no cost segment.
-function renderSubagentTask(t, cost, opts = {}) {
+// `str` padded with spaces to `width` visible cells, at its end or (`right`) its start.
+function padCells(str, width, right = false) {
+  const gap = ' '.repeat(Math.max(0, width - visibleWidth(str)));
+  return right ? gap + str : str + gap;
+}
+
+// A subagent row's segments, unpadded: name (bold, colored), activity (plain, one line, '' when
+// absent or equal to the name), model · effort, context bar, elapsed (the bare "4m12s") and cost.
+// An absent segment is ''.
+function subagentCells(t, cost, color) {
   const name = String(t.description || t.name || 'agent');
-  const color = opts.color || agentHashColor(name);
-  const head = `${colors.bold}${hexToAnsi(color)}${name}${colors.reset}`;
-  const parts = [];
-
-  const model = shortenModelId(t.model);
-  // effort absent = subagent inherits the session effort; show model alone then.
-  const effort = t.effort != null ? String(t.effort) : '';
-  if (model) {
-    parts.push(renderModelEffort(model, effort));
-  } else if (effort) {
-    parts.push(`${getEffortColor(effort)}${effort}${colors.reset}`);
-  }
-
-  if (Number.isFinite(t.tokenCount) && Number.isFinite(t.contextWindowSize) && t.contextWindowSize > 0) {
-    const used = Math.max(0, Math.min(100, Math.round((t.tokenCount / t.contextWindowSize) * 100)));
-    parts.push(renderContextBar(used));
-  }
-
-  const elapsed = formatElapsed(t.startTime);
-  if (elapsed) parts.push(`${colors.dim}⏱ ${elapsed}${colors.reset}`);
-
-  const costSegment = renderAgentCost(cost);
-  if (costSegment) parts.push(costSegment);
+  const cells = { name: `${colors.bold}${hexToAnsi(color || agentHashColor(name))}${name}${colors.reset}` };
 
   const oneLine = s => s.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
   const activity = typeof t.label === 'string' ? oneLine(t.label) : '';
   // With no live activity Claude Code passes the description as the label: the name, again.
-  if (activity && activity !== oneLine(name)) {
+  cells.activity = activity !== oneLine(name) ? activity : '';
+
+  const model = shortenModelId(t.model);
+  // effort absent = subagent inherits the session effort; show model alone then.
+  const effort = t.effort != null ? String(t.effort) : '';
+  cells.model = model ? renderModelEffort(model, effort) : (effort ? `${getEffortColor(effort)}${effort}${colors.reset}` : '');
+
+  cells.context = '';
+  if (Number.isFinite(t.tokenCount) && Number.isFinite(t.contextWindowSize) && t.contextWindowSize > 0) {
+    cells.context = renderContextBar(Math.max(0, Math.min(100, Math.round((t.tokenCount / t.contextWindowSize) * 100))));
+  }
+  cells.elapsed = formatElapsed(t.startTime);
+  cells.cost = renderAgentCost(cost);
+  return cells;
+}
+
+// Column order of a subagent row; `right` columns are numbers, aligned at their right edge.
+const SUBAGENT_COLUMNS = [
+  { key: 'name' }, { key: 'activity' }, { key: 'model' },
+  { key: 'context', right: true }, { key: 'elapsed', right: true }, { key: 'cost', right: true }
+];
+
+// subagentStatusLine rows, one per `{ task, cost, color }` entry, laid out as one table:
+// "name │ activity │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ $<cost>".
+// Each column is as wide as its widest cell across the rows, so every "│" sits at the same column
+// in every row. A column no row has is left out; a row missing a segment gets blank cells (the
+// separator kept) and ends after its last segment. name is the spawn description, bold in the
+// agent's color (`color`, from the registry; else its hash color). activity is the task's live
+// `label`, dim, given one shared width: its widest cell, cut with "…" to the room `cols` (the
+// terminal width) leaves after the panel's indent and the other columns, or to ACTIVITY_MAX when
+// the width is unknown; below a few cells of room it is dropped from every row. `cost` is the
+// subagent's readAgentCost(); absent -> no cost segment.
+function renderSubagentRows(entries, opts = {}) {
+  const rows = entries.map(({ task, cost, color }) => subagentCells(task, cost, color));
+  // The elapsed column's width includes its "⏱ " prefix.
+  const width = key => Math.max(0, ...rows.map(r => visibleWidth(r[key]) + (key === 'elapsed' && r[key] ? 2 : 0)));
+  const columns = SUBAGENT_COLUMNS
+    .map(col => ({ ...col, width: width(col.key) }))
+    .filter(col => col.width > 0);
+
+  const activityCol = columns.find(col => col.key === 'activity');
+  if (activityCol) {
+    const others = columns.filter(col => col !== activityCol);
     const cols = opts.cols;
     const room = Number.isFinite(cols) && cols > 0
-      ? cols - SUBAGENT_ROW_INDENT - WIDTH_MARGIN - visibleWidth([head, '', ...parts].join(SEGMENT_SEP))
+      ? cols - SUBAGENT_ROW_INDENT - WIDTH_MARGIN -
+        others.reduce((sum, col) => sum + col.width + visibleWidth(SEGMENT_SEP), 0)
       : ACTIVITY_MAX;
-    // Below a few cells the cut text says nothing: leave the segment out.
-    if (room >= Math.min(4, [...activity].length)) {
-      parts.unshift(`${colors.dim}${truncateText(activity, room)}${colors.reset}`);
+    // Below a few cells the cut text says nothing: leave the column out.
+    if (room >= Math.min(4, activityCol.width)) {
+      activityCol.width = Math.min(activityCol.width, room);
+    } else {
+      columns.splice(columns.indexOf(activityCol), 1);
     }
   }
 
-  return [head, ...parts].join(SEGMENT_SEP);
+  const render = (row, key, w) => {
+    const value = row[key];
+    if (!value) return '';
+    if (key === 'activity') return `${colors.dim}${truncateText(value, w)}${colors.reset}`;
+    if (key === 'elapsed') return `${colors.dim}⏱ ${padCells(value, w - 2, true)}${colors.reset}`;
+    return value;
+  };
+  return rows.map(row => {
+    const last = columns.reduce((at, col, i) => (row[col.key] ? i : at), 0);
+    return columns.slice(0, last + 1)
+      .map((col, i) => {
+        const cell = render(row, col.key, col.width);
+        return i === last && !col.right ? cell : padCells(cell, col.width, col.right);
+      })
+      .join(SEGMENT_SEP);
+  });
 }
 
-// subagentStatusLine mode: one {id, content} JSON line per task. No usage/git/todos work; the
-// one file read is each subagent's transcript for its cost (skipped with CTXLINE_DISABLE=cost).
-// Bad payload or a task that fails to render -> emit nothing (default rendering stays).
+// One task's row, laid out on its own (renderSubagentRows with a single entry).
+function renderSubagentTask(t, cost, opts = {}) {
+  return renderSubagentRows([{ task: t, cost, color: opts.color }], opts)[0];
+}
+
+// subagentStatusLine mode: one {id, content} JSON line per task, the rows aligned as one table.
+// No usage/git/todos work; the one file read is each subagent's transcript for its cost (skipped
+// with CTXLINE_DISABLE=cost). Bad payload or a render that throws -> emit nothing (default
+// rendering stays).
 function emitSubagent(data) {
   try {
-    const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+    const tasks = (Array.isArray(data?.tasks) ? data.tasks : []).filter(t => t && t.id);
     const costOf = t => (DISABLED.has('cost') ? null : readAgentCost(subagentTranscript(data?.transcript_path, t)));
     const registry = readAgentColors();
-    const cols = parseInt(process.env.COLUMNS, 10);
-    const optsOf = t => ({ color: agentColorOf(registry, String(t.description || t.name || 'agent')), cols });
-    const out = tasks
-      .filter(t => t && t.id)
-      .map(t => JSON.stringify({ id: t.id, content: renderSubagentTask(t, costOf(t), optsOf(t)) }))
-      .join('\n');
+    const entries = tasks.map(t => ({ task: t, cost: costOf(t), color: agentColorOf(registry, String(t.description || t.name || 'agent')) }));
+    const rows = renderSubagentRows(entries, { cols: parseInt(process.env.COLUMNS, 10) });
+    const out = tasks.map((t, i) => JSON.stringify({ id: t.id, content: rows[i] })).join('\n');
     if (out) {
       // Exit from the write callback: process.exit() would drop output queued behind backpressure.
       process.stdout.write(out + '\n', () => process.exit(0));
@@ -1287,5 +1350,5 @@ if (require.main === module) {
     readStdinThen(timeoutMs, (input) => finish(parseInput(input)));
   }
 } else {
-  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, renderContextBar, agentHashColor, agentColorOf, AGENT_PALETTE, formatUsd, usageCost, addCostLine, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
+  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, renderSubagentRows, renderContextBar, agentHashColor, agentColorOf, AGENT_PALETTE, formatUsd, usageCost, addCostLine, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
 }
