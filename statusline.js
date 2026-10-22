@@ -25,7 +25,9 @@ const DISABLED = new Set(
 );
 
 // Context bar width in cells. Each cell is a 6-dot braille glyph filled one dot at a time, left
-// column top to bottom, then the right one, so the bar grows in 1/36 steps of the window.
+// column top to bottom, then the right one, so the bar grows in 1/36 steps of the window. Cells
+// with no dot yet are a gray ⠿, the track; a glyph has one color, so a part-filled cell shows
+// only its filled dots.
 const BAR_WIDTH = 6;
 const BAR_CELLS = ['\u2800', '\u2801', '\u2803', '\u2807', '\u280f', '\u281f', '\u283f']; // ⠀⠁⠃⠇⠏⠟⠿
 const BAR_DOTS = BAR_CELLS.length - 1;
@@ -129,7 +131,8 @@ const colors = {
   yellow: '\x1b[33m',
   orange: '\x1b[38;5;208m',
   red: '\x1b[31m',
-  purple: '\x1b[38;5;135m'
+  purple: '\x1b[38;5;135m',
+  gray: '\x1b[90m'
 };
 
 // Levels rank low<medium<high<xhigh<max<ultracode; only max (red) and ultracode (purple) stand out.
@@ -271,11 +274,13 @@ function formatAheadBehind(ab) {
   return s;
 }
 
-// Colored "C<used> <bar>" (e.g. "C45 ⠿⠿⠟⠀⠀⠀"); shared by main line and subagent rows.
+// Colored "C<used> <bar>" (e.g. "C45 ⠿⠿⠟" then a gray "⠿⠿⠿"); shared by main line and subagent rows.
 function renderContextBar(used) {
   const dots = Math.round((Math.max(0, Math.min(100, used)) / 100) * BAR_WIDTH * BAR_DOTS);
+  const lit = Math.ceil(dots / BAR_DOTS);
   let bar = '';
-  for (let i = 0; i < BAR_WIDTH; i++) bar += BAR_CELLS[Math.max(0, Math.min(BAR_DOTS, dots - i * BAR_DOTS))];
+  for (let i = 0; i < lit; i++) bar += BAR_CELLS[Math.min(BAR_DOTS, dots - i * BAR_DOTS)];
+  const track = lit < BAR_WIDTH ? `${colors.gray}${BAR_CELLS[BAR_DOTS].repeat(BAR_WIDTH - lit)}${colors.reset}` : '';
 
   let color;
   if (used < 50) color = colors.green;
@@ -283,7 +288,7 @@ function renderContextBar(used) {
   else if (used < 80) color = colors.orange;
   else color = colors.red;
 
-  return `${color}C${used} ${bar}${colors.reset}`;
+  return `${color}C${used} ${bar}${colors.reset}${track}`;
 }
 
 function getContextBar(remaining) {
