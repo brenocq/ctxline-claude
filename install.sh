@@ -1,135 +1,139 @@
-#!/bin/bash
-# Claude Code Enhanced Statusline - Installation Script
+#!/usr/bin/env bash
+# Installs the ctxline status line and the agent-color script into ~/.claude:
+#   install.sh [--dry-run]
+# Run from a checkout, it installs that checkout's statusline.js and agent-color.js; piped from
+# curl, it downloads both from the fork's breno-dev branch. It then sets statusLine (refreshed
+# every second, fed by `capcom record-limits` when capcom is on PATH) and subagentStatusLine in
+# ~/.claude/settings.json, backing up what it replaces and leaving every other setting alone.
+set -euo pipefail
 
-set -e
+readonly REPO_URL="https://raw.githubusercontent.com/brenocq/ctxline-claude/breno-dev"
+readonly HOOKS_DIR="$HOME/.claude/hooks"
+readonly SETTINGS_FILE="$HOME/.claude/settings.json"
 
-HOOKS_DIR="$HOME/.claude/hooks"
-SETTINGS_FILE="$HOME/.claude/settings.json"
-REPO_URL="https://raw.githubusercontent.com/MithunWijayasiri/ctxline-claude/main"
+readonly GREEN=$'\033[0;32m' YELLOW=$'\033[1;33m' RED=$'\033[0;31m' CYAN=$'\033[0;36m'
+readonly DIM=$'\033[2m' NC=$'\033[0m'
 
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-CYAN='\033[0;36m'
-DIM='\033[2m'
-NC='\033[0m' # No Color
+die() {
+  printf '%sError: %s%s\n' "$RED" "$*" "$NC" >&2
+  exit 1
+}
 
-echo -e "\033[38;5;173m█${NC} \033[38;5;239m█${NC} ${CYAN}ctxline${NC} ${DIM}· statusline for Claude Code${NC}"
-echo ""
+ok() {
+  printf '%s✓ %s%s\n' "$GREEN" "$*" "$NC"
+}
 
-# Check if Claude Code is installed
-if [ ! -d "$HOME/.claude" ]; then
-    echo -e "${RED}Error: Claude Code not found!${NC}"
-    echo "Please install Claude Code first: https://github.com/anthropics/claude-code"
-    exit 1
-fi
+# Prints the directory holding this script when it holds both files to install; prints nothing
+# when the script arrived on stdin or sits outside a checkout.
+checkout_dir() {
+  local self=${BASH_SOURCE[0]:-} dir
+  [[ -n $self && -f $self ]] || return 0
+  dir=$(cd -P -- "$(dirname -- "$self")" && pwd -P)
+  if [[ -f $dir/statusline.js && -f $dir/agent-color.js ]]; then
+    printf '%s\n' "$dir"
+  fi
+}
 
-# Create hooks directory if it doesn't exist
-mkdir -p "$HOOKS_DIR"
+download() {
+  local url=$1 dest=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dest"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$url" -O "$dest"
+  else
+    die "neither curl nor wget found; install one, or run this script from a checkout"
+  fi
+}
 
-SCRIPT_NAME="statusline.js"
-
-# Download the script
-echo ""
-echo -e "${YELLOW}Downloading statusline...${NC}"
-
-if command -v curl &> /dev/null; then
-    curl -fsSL "$REPO_URL/$SCRIPT_NAME" -o "$HOOKS_DIR/$SCRIPT_NAME"
-elif command -v wget &> /dev/null; then
-    wget -q "$REPO_URL/$SCRIPT_NAME" -O "$HOOKS_DIR/$SCRIPT_NAME"
-else
-    echo -e "${RED}Error: Neither curl nor wget found. Please install one of them.${NC}"
-    exit 1
-fi
-
-# Make executable
-chmod +x "$HOOKS_DIR/$SCRIPT_NAME"
-
-echo -e "${GREEN}✓ Downloaded and installed $SCRIPT_NAME${NC}"
-
-# Update settings.json
-echo ""
-echo -e "${YELLOW}Updating Claude Code settings...${NC}"
-
-# Backup existing settings
-if [ -f "$SETTINGS_FILE" ]; then
-    cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%s)"
-    echo -e "${GREEN}✓ Backed up existing settings${NC}"
-fi
-
-# Check if settings.json exists
-if [ ! -f "$SETTINGS_FILE" ]; then
-    # Create new settings file
-    cat > "$SETTINGS_FILE" << EOF
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node \"$HOOKS_DIR/$SCRIPT_NAME\""
-  },
-  "subagentStatusLine": {
-    "type": "command",
-    "command": "node \"$HOOKS_DIR/$SCRIPT_NAME\" subagent"
+# Sets statusLine and subagentStatusLine in settings.json (created when missing), written through
+# a temporary file so a failure leaves the old file in place.
+write_settings() {
+  MAIN=$1 SUB=$2 node - "$SETTINGS_FILE" <<'EOF'
+const fs = require('fs');
+const file = process.argv[2];
+let settings = {};
+if (fs.existsSync(file)) {
+  try {
+    settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    console.error(`${file} is not valid JSON (${e.message}); fix it and run the installer again`);
+    process.exit(1);
   }
 }
+settings.statusLine = { type: 'command', command: process.env.MAIN, refreshInterval: 1 };
+settings.subagentStatusLine = { type: 'command', command: process.env.SUB };
+fs.writeFileSync(`${file}.tmp`, JSON.stringify(settings, null, 2) + '\n');
+fs.renameSync(`${file}.tmp`, file);
 EOF
-    echo -e "${GREEN}✓ Created new settings.json${NC}"
-else
-    # Update existing settings.json using node
-    node << EOF
-const fs = require('fs');
-const path = require('path');
-
-const settingsPath = path.join(process.env.HOME, '.claude', 'settings.json');
-let settings = {};
-
-try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-} catch (e) {
-    // File doesn't exist or is invalid JSON
 }
 
-settings.statusLine = {
-    type: 'command',
-    command: 'node "$HOOKS_DIR/$SCRIPT_NAME"'
-};
+main() {
+  local dry=0
+  case ${1:-} in
+    '') ;;
+    --dry-run) dry=1 ;;
+    *)
+      printf 'usage: %s [--dry-run]\n' "${0##*/}" >&2
+      exit 2
+      ;;
+  esac
 
-settings.subagentStatusLine = {
-    type: 'command',
-    command: 'node "$HOOKS_DIR/$SCRIPT_NAME" subagent'
-};
+  printf '\033[38;5;173m█%s \033[38;5;239m█%s %sctxline%s %s· statusline for Claude Code%s\n\n' \
+    "$NC" "$NC" "$CYAN" "$NC" "$DIM" "$NC"
 
-fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-console.log('Settings updated successfully');
-EOF
+  [[ -d $HOME/.claude ]] || die "Claude Code not found (~/.claude is missing); install it first: https://github.com/anthropics/claude-code"
+  command -v node >/dev/null 2>&1 || die "node not found; the status line runs on Node.js 18 or later"
 
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ Updated settings.json${NC}"
-    else
-        echo -e "${RED}✗ Failed to update settings.json automatically${NC}"
-        echo ""
-        echo "Please manually add this to $SETTINGS_FILE:"
-        echo ""
-        echo '  "statusLine": {'
-        echo '    "type": "command",'
-        echo "    \"command\": \"node \\\"$HOOKS_DIR/$SCRIPT_NAME\\\"\""
-        echo '  },'
-        echo '  "subagentStatusLine": {'
-        echo '    "type": "command",'
-        echo "    \"command\": \"node \\\"$HOOKS_DIR/$SCRIPT_NAME\\\" subagent\""
-        echo '  }'
-    fi
-fi
+  local src from feed='' main_cmd sub_cmd
+  src=$(checkout_dir)
+  from=${src:-$REPO_URL}
+  if command -v capcom >/dev/null 2>&1; then
+    feed='capcom record-limits | '
+  else
+    printf '%scapcom not found: the main line runs without its usage limits feed%s\n' "$YELLOW" "$NC"
+  fi
+  main_cmd="${feed}node \"$HOOKS_DIR/statusline.js\""
+  sub_cmd="node \"$HOOKS_DIR/statusline.js\" subagent"
 
-# Success message
-echo ""
-echo -e "${GREEN}✓ ctxline installed${NC}"
-echo ""
-echo "Restart Claude Code or start a new session."
-echo ""
-echo "To uninstall:"
-echo "  - Remove ~/.claude/hooks/$SCRIPT_NAME"
-echo "  - Remove the 'statusLine' and 'subagentStatusLine' sections from ~/.claude/settings.json"
-echo ""
-echo "For help, visit: https://github.com/MithunWijayasiri/ctxline-claude"
-echo ""
+  if ((dry)); then
+    printf 'would install %s/statusline.js -> %s/statusline.js\n' "$from" "$HOOKS_DIR"
+    printf 'would install %s/agent-color.js -> %s/agent-color\n' "$from" "$HOOKS_DIR"
+    printf 'would set statusLine.command = %s (refreshInterval 1)\n' "$main_cmd"
+    printf 'would set subagentStatusLine.command = %s\n' "$sub_cmd"
+    return 0
+  fi
+
+  if [[ -z $src ]]; then
+    printf '%sDownloading from %s...%s\n' "$YELLOW" "$REPO_URL" "$NC"
+    src=$(mktemp -d "${TMPDIR:-/tmp}/ctxline.XXXXXX")
+    # Expanded now: src is local to main and out of scope when the trap runs.
+    # shellcheck disable=SC2064
+    trap "rm -rf -- '$src'" EXIT
+    download "$REPO_URL/statusline.js" "$src/statusline.js"
+    download "$REPO_URL/agent-color.js" "$src/agent-color.js"
+  fi
+
+  local stamp
+  stamp=$(date +%s)
+  mkdir -p "$HOOKS_DIR"
+  if [[ -f $HOOKS_DIR/statusline.js ]]; then
+    cp "$HOOKS_DIR/statusline.js" "$HOOKS_DIR/statusline.js.backup.$stamp"
+  fi
+  cp "$src/statusline.js" "$HOOKS_DIR/statusline.js"
+  cp "$src/agent-color.js" "$HOOKS_DIR/agent-color"
+  chmod +x "$HOOKS_DIR/statusline.js" "$HOOKS_DIR/agent-color"
+  ok "Installed statusline.js and agent-color from $from"
+
+  if [[ -f $SETTINGS_FILE ]]; then
+    cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$stamp"
+  fi
+  write_settings "$main_cmd" "$sub_cmd" || die "could not update $SETTINGS_FILE"
+  ok "Set statusLine and subagentStatusLine in $SETTINGS_FILE (any backups end in .backup.$stamp)"
+
+  printf '\nRestart Claude Code or start a new session.\n\n'
+  printf 'To uninstall:\n'
+  printf '  - Remove ~/.claude/hooks/statusline.js and ~/.claude/hooks/agent-color\n'
+  printf "  - Remove the 'statusLine' and 'subagentStatusLine' sections from ~/.claude/settings.json\n"
+}
+
+main "$@"
