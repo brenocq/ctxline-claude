@@ -137,6 +137,7 @@ const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 const ORANGE = '\x1b[38;5;208m';
 const RED = '\x1b[31m';
+const GRAY = '\x1b[90m';
 const PURPLE = '\x1b[38;5;135m';
 const DIM = '\x1b[2m';
 const BOLD = '\x1b[1m';
@@ -302,7 +303,12 @@ test('context bar shows used% = 100 - remaining', () => {
 });
 
 // The bar: 6 braille cells, each filled dot by dot (⠀⠁⠃⠇⠏⠟⠿), 36 steps over the window.
-const barOf = (used) => renderContextBar(used).replace(/\x1b\[[0-9;]*m/g, '').split(' ')[1];
+// The gray track's cells read as '⠀' here; the track test checks how they are drawn.
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
+const barOf = (used) => {
+  const [lit, track = ''] = renderContextBar(used).split(GRAY);
+  return stripAnsi(lit).split(' ')[1] + '⠀'.repeat([...stripAnsi(track)].length);
+};
 
 test('context bar: empty at 0%, full at 100%, six cells always', () => {
   assert.strictEqual(barOf(0), '⠀⠀⠀⠀⠀⠀');
@@ -324,6 +330,12 @@ test('context bar: fills one dot per 1/36 of the window, left column first', () 
 test('context bar: over 100% or below 0% stays within the bar', () => {
   assert.strictEqual(barOf(130), '⠿⠿⠿⠿⠿⠿');
   assert.strictEqual(barOf(-5), '⠀⠀⠀⠀⠀⠀');
+});
+
+test('context bar: cells with no dot are a gray ⠿ track', () => {
+  assert.ok(renderContextBar(0).endsWith(`${GRAY}⠿⠿⠿⠿⠿⠿\x1b[0m`));
+  assert.ok(renderContextBar(24).endsWith(`⠿⠇\x1b[0m${GRAY}⠿⠿⠿⠿\x1b[0m`));
+  assert.ok(!renderContextBar(100).includes(GRAY));
 });
 
 test('context bar: label and bar share the threshold color', () => {
