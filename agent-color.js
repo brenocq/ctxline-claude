@@ -17,8 +17,15 @@ const os = require('os');
 // Mirrors AGENT_PALETTE in statusline.js (a test keeps them equal). Readable on a dark terminal
 // and clear of the colors that already mean something: green (recommended), red (broken),
 // magenta/pink (pending), gray (notes), the context bar's yellow/orange, and the orchestrator's
-// own blue (#5bb8f5), which only the main session's question and review blocks use.
-const PALETTE = ['#c78bf0', '#3fc9b0', '#f4a582', '#7b8cff', '#d8c8a0', '#a8e6ef', '#c2b5f7'];
+// own blue (#5bb8f5), which only the main session's question and review blocks use. Each color is
+// at least CIELAB ΔE 25 from the default text, those reserved colors and every other palette color
+// (test/agent-color.test.js lists them), so an agent's name never reads as one of them. Red, orange,
+// yellow and green appear only as pastels and pink not at all. Agents take colors in palette order,
+// so the order spreads hues: the first few are far apart and neighbors never look alike.
+const PALETTE = [
+  '#b868fc', '#ccf4ac', '#06d2f0', '#fcc4c4', '#0094f4', '#c8d4fa', '#709c5c', '#c87c70',
+  '#00fcf8', '#7484fc', '#04b888', '#948cb0', '#00fcbc', '#00a29e', '#dca8fc', '#b8f0dc'
+];
 
 const RECENT_MS = 24 * 60 * 60 * 1000;   // window counted when picking the least-used color
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;  // entries older than this are dropped
