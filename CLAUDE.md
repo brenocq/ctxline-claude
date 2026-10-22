@@ -6,12 +6,12 @@ npm package `ctxline-claude` — single-file statusline for Claude Code:
 
 ```text
 dir ⎇ branch ↑N↓M │ model · effort │ C<used> <bar> │ H<pct> ↺ <reset> │ W<pct> ↺ <reset> │ <model-initial><pct> ↺ <reset> │ $<cost> │ task
-⬆ <latest> available · npx ctxline-claude@latest     (or, 5s after a self-install: ⬆ ctxline updated <old> → <new>)
+⬆ <latest> available · npx ctxline-claude@latest     (or, 5s after a self-install, which breno-dev never does: ⬆ ctxline updated <old> → <new>)
 ```
 
 `C` context (only segment with a bar), `H` 5-hour usage, `W` 7-day usage, `<model-initial>` model-scoped weekly limit, `$` session cost. Everything after `dir`/`model`/`C` is conditional — renders only when its source resolves. The `⬆` row is not a segment — appended below the layout only when a newer release is cached (nudge) or a self-install just landed (updated, `UPDATED_NOTICE_MS` 5s from first render).
 
-Auto-update (default on; `CTXLINE_DISABLE=autoupdate` off): the detached `update-check` child, on finding a newer npm release, downloads `statusline.js` from GitHub raw at tag `v<latest>`, requires its `VERSION` to equal `<latest>`, and swaps it in via temp file + rename. Only when the running file is `~/.claude/hooks/statusline.js` — a working-tree copy (local testing) is never overwritten. Every release needs its `v<version>` tag pushed, or installs fail and fall back to the nudge.
+Auto-update (off on breno-dev: `SELF_INSTALL = false`, one gate in `runUpdateCheck`, since a release comes from upstream and would overwrite the fork's hook; the check and the nudge row still run, `test/update-check.test.js` pins both. Upstream: default on, `CTXLINE_DISABLE=autoupdate` off): the detached `update-check` child, on finding a newer npm release, downloads `statusline.js` from GitHub raw at tag `v<latest>`, requires its `VERSION` to equal `<latest>`, and swaps it in via temp file + rename. Only when the running file is `~/.claude/hooks/statusline.js` — a working-tree copy (local testing) is never overwritten. Every release needs its `v<version>` tag pushed, or installs fail and fall back to the nudge.
 
 Repo also ships `ctxline-desktop`, a Claude Code plugin (mod) for the desktop app's Code tab, which doesn't run statusline scripts. See [Desktop plugin](#desktop-plugin).
 

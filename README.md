@@ -110,8 +110,8 @@ To hide segments, set `CTXLINE_DISABLE` to a comma-separated list of:
 | `cost` | Session cost, and each subagent row's cost (skips reading their transcripts) |
 | `task` | Current task |
 | `usage` | 5-hour, weekly, and model limits |
-| `autoupdate` | Auto-update. You get an upgrade notice instead |
-| `update` | Auto-update and the upgrade notice |
+| `autoupdate` | Auto-update, which `breno-dev` already never does. You get an upgrade notice instead |
+| `update` | The update check and the upgrade notice |
 
 Directory, model, and context always show.
 
@@ -129,12 +129,12 @@ Or export it in your shell before running `claude`. Restart Claude Code to apply
 
 ## Update
 
-ctxline updates itself. Every 3 days a background process checks npm. When a newer release is out, it downloads it from GitHub and swaps it in. The statusline then shows `⬆ ctxline updated <old> → <new>` for 5 seconds.
+On this fork's `breno-dev` branch, ctxline never replaces itself: a release comes from upstream and would overwrite the fork's status line. Every 3 days a background process still checks npm, and when a newer upstream release is out the statusline shows a `⬆ <version> available` row.
 
-To update by hand:
+To update, merge upstream into `breno-dev`, then reinstall from the checkout:
 
 ```bash
-npx ctxline-claude@latest
+./install.sh
 ```
 
 ## Uninstall
