@@ -20,10 +20,16 @@ const ansiOf = (hex) => `\x1b[38;2;${parseInt(hex.slice(1, 3), 16)};${parseInt(h
 
 // ── palette ──
 
-test('palette: the CLI and the status line share one palette of 8 distinct colors', () => {
+const ORCHESTRATOR_BLUE = '#5bb8f5';
+
+test('palette: the CLI and the status line share one palette of 7 distinct colors', () => {
   assert.deepStrictEqual(AGENT_PALETTE, PALETTE);
-  assert.strictEqual(new Set(PALETTE).size, 8);
+  assert.strictEqual(new Set(PALETTE).size, 7);
   for (const c of PALETTE) assert.match(c, /^#[0-9a-f]{6}$/);
+});
+
+test('palette: the orchestrator blue is reserved, never an agent color', () => {
+  assert.ok(!PALETTE.includes(ORCHESTRATOR_BLUE));
 });
 
 // ── assignment (pure) ──
@@ -45,6 +51,19 @@ test('assign: an existing agent keeps its color, and its entry is unchanged', ()
   const r = assignColor(reg, 'Docs', NOW);
   assert.strictEqual(r.color, PALETTE[3]);
   assert.deepStrictEqual(r.registry, reg);
+});
+
+test('assign: an entry holding a retired color is reassigned from the current palette', () => {
+  const reg = {
+    Retired: { color: ORCHESTRATOR_BLUE.toUpperCase(), assigned: at(NOW - HOUR) },
+    Other: { color: ORCHESTRATOR_BLUE, assigned: at(NOW - HOUR) },
+    a: { color: PALETTE[0], assigned: at(NOW - HOUR) }
+  };
+  const r = assignColor(reg, 'Retired', NOW);
+  assert.strictEqual(r.color, PALETTE[1], 'least used, retired uses not counted');
+  assert.deepStrictEqual(r.registry.Retired, { color: PALETTE[1], assigned: at(NOW) });
+  assert.deepStrictEqual(r.registry.Other, reg.Other, 'other entries wait until they are asked for');
+  assert.strictEqual(assignColor(r.registry, 'Retired', NOW + HOUR).color, PALETTE[1], 'then kept');
 });
 
 test('assign: least used in the last 24 h wins; older entries do not count', () => {
@@ -169,8 +188,8 @@ const task = {
 };
 
 test('row: name bold in its color, then activity (dim), model, bar, time, cost', () => {
-  const row = renderSubagentTask({ ...task, label: 'Running npm test' }, { usd: 1.5 }, { color: '#5bb8f5' });
-  assert.ok(row.startsWith(`\x1b[1m${ansiOf('#5bb8f5')}Agent colors\x1b[0m`), JSON.stringify(row));
+  const row = renderSubagentTask({ ...task, label: 'Running npm test' }, { usd: 1.5 }, { color: '#c78bf0' });
+  assert.ok(row.startsWith(`\x1b[1m${ansiOf('#c78bf0')}Agent colors\x1b[0m`), JSON.stringify(row));
   assert.ok(row.includes('\x1b[2mRunning npm test\x1b[0m'), 'activity is dim');
   const parts = clean(row).split(' │ ');
   assert.deepStrictEqual(parts.slice(0, 3), ['Agent colors', 'Running npm test', 'Opus 5.5 · high']);
