@@ -132,7 +132,7 @@ const colors = {
   orange: '\x1b[38;5;208m',
   red: '\x1b[31m',
   purple: '\x1b[38;5;135m',
-  gray: '\x1b[90m'
+  gray: '\x1b[38;5;238m'
 };
 
 // Levels rank low<medium<high<xhigh<max<ultracode; only max (red) and ultracode (purple) stand out.
