@@ -79,7 +79,10 @@ const SUBAGENT_TIMEOUT_MS = 500;
 // agent-color.js (a test keeps them equal), so it leaves out the orchestrator's blue (#5bb8f5) too,
 // and keeps every color at least ΔE 25 from the default text, the reserved colors and each other.
 const AGENT_COLORS_FILE = path.join(os.homedir(), '.claude', 'agent-colors.json');
-const AGENT_PALETTE = ['#c78bf0', '#3fc9b0', '#fca8a0', '#6888f8', '#8cb084', '#a8e6ef', '#c2b5f7'];
+const AGENT_PALETTE = [
+  '#b868fc', '#ccf4ac', '#06d2f0', '#fcc4c4', '#0094f4', '#c8d4fa', '#709c5c', '#c87c70',
+  '#00fcf8', '#7484fc', '#04b888', '#948cb0', '#00fcbc', '#00a29e', '#dca8fc', '#b8f0dc'
+];
 // A subagent row's live activity is cut to fit the terminal; with no known width, to this.
 const ACTIVITY_MAX = 48;
 // Cells the agent panel draws before each row (its own bullet and indent).
