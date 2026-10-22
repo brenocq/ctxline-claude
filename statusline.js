@@ -76,9 +76,10 @@ const SUBAGENT_TIMEOUT_MS = 500;
 // Each subagent's name is drawn in its own color: the one `agent-color` (agent-color.js, installed
 // beside this file) assigned it in AGENT_COLORS_FILE, read here only, never written; an agent
 // missing from it gets a stable hash of its name into the palette. Mirrors PALETTE in
-// agent-color.js (a test keeps them equal), so it leaves out the orchestrator's blue (#5bb8f5) too.
+// agent-color.js (a test keeps them equal), so it leaves out the orchestrator's blue (#5bb8f5) too,
+// and keeps every color at least ΔE 25 from the default text, the reserved colors and each other.
 const AGENT_COLORS_FILE = path.join(os.homedir(), '.claude', 'agent-colors.json');
-const AGENT_PALETTE = ['#c78bf0', '#3fc9b0', '#f4a582', '#7b8cff', '#d8c8a0', '#a8e6ef', '#c2b5f7'];
+const AGENT_PALETTE = ['#c78bf0', '#3fc9b0', '#fca8a0', '#6888f8', '#8cb084', '#a8e6ef', '#c2b5f7'];
 // A subagent row's live activity is cut to fit the terminal; with no known width, to this.
 const ACTIVITY_MAX = 48;
 // Cells the agent panel draws before each row (its own bullet and indent).

@@ -32,6 +32,62 @@ test('palette: the orchestrator blue is reserved, never an agent color', () => {
   assert.ok(!PALETTE.includes(ORCHESTRATOR_BLUE));
 });
 
+// The colors an agent name must stay clear of, from Breno's terminal (kitty, gruvbox dark) and the
+// orchestrator's conventions: the default text and background, the orchestrator's blue, the tints
+// of the words "questions" and "review" in its blocks, and the named colors Claude uses for meaning.
+const DEFAULT_TEXT = '#ebdbb2';
+const RESERVED = {
+  'default text': DEFAULT_TEXT,
+  background: '#282828',
+  'orchestrator blue': ORCHESTRATOR_BLUE,
+  'questions tint': '#e19c60',
+  'review tint': '#c2b966',
+  green: '#98971a',
+  red: '#cc241d',
+  magenta: '#b16286',
+  gray: '#928374'
+};
+const MIN_DELTA_E = 25;
+
+// CIELAB (D65) from sRGB hex; ΔE76 is the Euclidean distance between two of them.
+function lab(hex) {
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const [r, g, b] = [1, 3, 5].map(i => lin(parseInt(hex.slice(i, i + 2), 16) / 255));
+  const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+  const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+}
+const deltaE = (a, b) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]));
+
+test('palette: ΔE matches known reference values', () => {
+  assert.ok(Math.abs(deltaE('#000000', '#ffffff') - 100) < 0.01);
+  assert.ok(Math.abs(lab('#ff0000')[1] - 80.1) < 0.2, 'red a*');
+});
+
+test('palette: every color is at least ΔE 25 from the default text and the reserved colors', () => {
+  const close = [];
+  for (const c of PALETTE) {
+    for (const [what, r] of Object.entries(RESERVED)) {
+      const d = deltaE(c, r);
+      if (d < MIN_DELTA_E) close.push(`${c} vs ${what} ${r}: ${d.toFixed(1)}`);
+    }
+  }
+  assert.deepStrictEqual(close, []);
+});
+
+test('palette: every two agent colors are at least ΔE 25 apart', () => {
+  const close = [];
+  for (let i = 0; i < PALETTE.length; i++) {
+    for (let j = i + 1; j < PALETTE.length; j++) {
+      const d = deltaE(PALETTE[i], PALETTE[j]);
+      if (d < MIN_DELTA_E) close.push(`${PALETTE[i]} vs ${PALETTE[j]}: ${d.toFixed(1)}`);
+    }
+  }
+  assert.deepStrictEqual(close, []);
+});
+
 // ── assignment (pure) ──
 
 test('assign: first agents take the palette in order', () => {
@@ -64,6 +120,14 @@ test('assign: an entry holding a retired color is reassigned from the current pa
   assert.deepStrictEqual(r.registry.Retired, { color: PALETTE[1], assigned: at(NOW) });
   assert.deepStrictEqual(r.registry.Other, reg.Other, 'other entries wait until they are asked for');
   assert.strictEqual(assignColor(r.registry, 'Retired', NOW + HOUR).color, PALETTE[1], 'then kept');
+});
+
+test('assign: the colors retired for contrast are reassigned on the next lookup', () => {
+  for (const old of ['#f4a582', '#7b8cff', '#d8c8a0']) {
+    const r = assignColor({ Agent: { color: old, assigned: at(NOW - HOUR) } }, 'Agent', NOW);
+    assert.notStrictEqual(r.color, old);
+    assert.ok(PALETTE.includes(r.color), `${old} -> ${r.color}`);
+  }
 });
 
 test('assign: least used in the last 24 h wins; older entries do not count', () => {
