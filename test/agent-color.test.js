@@ -9,7 +9,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { makeHome, spawnSubagent } = require('./fixture');
 const { PALETTE, assignColor, KEEP_MS, RECENT_MS } = require('../agent-color.js');
-const { renderSubagentTask, agentHashColor, agentColorOf, AGENT_PALETTE } = require('../statusline.js');
+const { renderSubagentTask, renderSubagentRows, agentHashColor, agentColorOf, AGENT_PALETTE } = require('../statusline.js');
 
 const CLI = path.join(__dirname, '..', 'agent-color.js');
 const NOW = Date.parse('2026-10-22T12:00:00Z');
@@ -341,6 +341,102 @@ test('row: subagent mode reads the registry color and COLUMNS', () => {
     assert.ok(content.includes(ansiOf('#c78bf0')), 'registry color');
     assert.strictEqual([...clean(content)].length, 76);
     assert.ok(!fs.readdirSync(path.join(home, '.claude')).some(f => f.endsWith('.lock') || f.endsWith('.tmp')), 'read-only');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ── the rows, aligned ──
+
+// Terminal cells of a character: two for CJK, one otherwise (enough for these rows).
+const cellsOf = (ch) => (/[\u4e00-\u9fff]/.test(ch) ? 2 : 1);
+// Cell offsets of every "│" in a rendered row.
+const barColumns = (row) => {
+  let at = 0;
+  return [...clean(row)].flatMap((ch) => { const here = at; at += cellsOf(ch); return ch === '│' ? [here] : []; });
+};
+const fleet = [
+  { task: { ...task, id: 'a', description: 'memory-leak-notebook', label: 'Polling soak run logs for completion', tokenCount: 82000, startTime: Date.now() - 4 * 3600e3 - 20 * 60e3 }, cost: { usd: 51.04 }, color: '#b868fc' },
+  { task: { ...task, id: 'b', description: 'lm-walks-default', label: 'Confirming clean imu_fusion_config.h commit', tokenCount: 9000, startTime: Date.now() - 45000 }, cost: { usd: 7.2 }, color: '#06d2f0' },
+  { task: { ...task, id: 'c', description: 'parity-batch', model: 'claude-sonnet-5', effort: 'medium', label: 'Writing session.sh', tokenCount: 200000, startTime: Date.now() - 2 * 3600e3 }, cost: { usd: 4.38 }, color: '#0094f4' },
+  { task: { ...task, id: 'd', description: 'x', label: 'Reading the agent panel docs to see how wide a row may be', startTime: Date.now() - 600e3 }, cost: { usd: 0.05 }, color: '#709c5c' }
+];
+
+test('rows: every separator sits at the same column in every row', () => {
+  for (const cols of [undefined, 200, 120]) {
+    const rows = renderSubagentRows(fleet, { cols });
+    assert.strictEqual(rows.length, fleet.length);
+    const first = barColumns(rows[0]);
+    assert.strictEqual(first.length, 5, `cols ${cols}: six segments`);
+    for (const row of rows) assert.deepStrictEqual(barColumns(row), first, `cols ${cols}:\n${rows.map(clean).join('\n')}`);
+    const widths = new Set(rows.map(r => [...clean(r)].length));
+    assert.strictEqual(widths.size, 1, 'every row ends at the same column');
+  }
+});
+
+test('rows: numbers are right-aligned, names and activity left-aligned', () => {
+  const rows = renderSubagentRows(fleet, { cols: 200 }).map(clean);
+  const seg = (row, i) => row.split('│')[i];
+  assert.match(seg(rows[3], 0), /^x {20}$/, 'name padded at its end');
+  assert.match(seg(rows[0], 5), /^ \$51\.04$/);
+  assert.match(seg(rows[2], 5), /^  \$4\.38$/);
+  assert.match(seg(rows[1], 3), /^   C5 /, 'context number right-aligned under C100');
+  assert.match(seg(rows[1], 4), /^ ⏱   \d\ds $/, 'elapsed right-aligned after the stopwatch');
+  assert.match(seg(rows[2], 1), /^ Writing session\.sh +$/, 'short activity padded');
+});
+
+test('rows: a narrow terminal shrinks the activity column for every row, then drops it', () => {
+  const wide = renderSubagentRows(fleet, { cols: 200 }).map(clean);
+  const activityWidth = (rows) => rows[0].split('│')[1].length;
+  for (const cols of [100, 90]) {
+    const rows = renderSubagentRows(fleet, { cols });
+    for (const row of rows) assert.strictEqual([...clean(row)].length, cols - 4, `cols ${cols}: fits less the indent`);
+    for (const row of rows) assert.deepStrictEqual(barColumns(row), barColumns(rows[0]));
+    assert.ok(activityWidth(rows.map(clean)) < activityWidth(wide));
+    assert.match(clean(rows[0]).split('│')[1], /… $/, 'cut with "…"');
+  }
+  const narrow = renderSubagentRows(fleet, { cols: 60 }).map(clean);
+  for (const row of narrow) {
+    assert.strictEqual(row.split('│').length, 5, 'activity dropped from every row');
+    assert.deepStrictEqual(barColumns(row), barColumns(narrow[0]));
+  }
+});
+
+test('rows: a missing segment leaves a gap and the other columns stay aligned', () => {
+  const sparse = [
+    fleet[0],
+    { task: { id: 'e', description: 'no-effort', model: 'claude-opus-5-5', label: 'Waiting', startTime: Date.now() - 5000 }, cost: null },
+    { task: { id: 'f', description: 'bare', label: 'bare' }, cost: null },
+    { task: { ...task, id: 'g', description: 'no-activity', label: undefined }, cost: { usd: 2 } }
+  ];
+  const rows = renderSubagentRows(sparse, { cols: 200 });
+  const full = barColumns(rows[0]);
+  const plain = rows.map(clean);
+  // Every row's separators are the full row's, cut where its own segments end.
+  for (const row of rows) assert.deepStrictEqual(barColumns(row), full.slice(0, barColumns(row).length), plain.join('\n'));
+  assert.strictEqual(plain[2].trimEnd(), plain[2], 'no trailing padding');
+  assert.strictEqual(plain[2], 'bare', 'nothing past the name, the label equal to it dropped');
+  assert.match(plain[1], /│ Opus 5\.5 +│ +│/, 'model alone, context gap kept');
+  assert.match(plain[3].split('│')[1], /^ +$/, 'activity gap kept');
+  assert.strictEqual(plain[3].split('│')[5].trim(), '$2.00');
+});
+
+test('rows: wide glyphs count two cells', () => {
+  const rows = renderSubagentRows([
+    { task: { ...task, id: 'a', description: '测试代理', label: 'go' }, cost: null },
+    { task: { ...task, id: 'b', description: 'abcdefghij', label: 'go' }, cost: null }
+  ], { cols: 200 });
+  assert.deepStrictEqual(barColumns(rows[0]), barColumns(rows[1]), rows.map(clean).join('\n'));
+});
+
+test('rows: subagent mode aligns the rows of every task in one payload', () => {
+  const home = makeHome();
+  try {
+    const input = JSON.stringify({ tasks: fleet.map(e => e.task) });
+    const res = spawnSubagent(input, { ...process.env, HOME: home, USERPROFILE: home, COLUMNS: '120' });
+    const rows = res.stdout.trim().split('\n').map(line => JSON.parse(line));
+    assert.deepStrictEqual(rows.map(r => r.id), ['a', 'b', 'c', 'd']);
+    for (const { content } of rows) assert.deepStrictEqual(barColumns(content), barColumns(rows[0].content));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
