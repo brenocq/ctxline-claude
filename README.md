@@ -55,6 +55,8 @@ cd ctxline-claude
 ./install.ps1     # Windows (PowerShell)
 ```
 
+On this fork's `breno-dev` branch, `install.sh` installs the checkout's own `statusline.js` and `agent-color` script, so what is checked out is what gets installed; with no checkout beside it (`curl -fsSL https://raw.githubusercontent.com/brenocq/ctxline-claude/breno-dev/install.sh | bash`) it downloads both from `breno-dev`. It sets `statusLine` to refresh every second, fed by `capcom record-limits` when `capcom` is on `PATH`, backs up what it replaces, and `./install.sh --dry-run` prints what it would do.
+
 Or install by hand. Download the script:
 
 ```bash
@@ -238,7 +240,7 @@ From the transcript Claude Code keeps for each subagent, read on your machine on
 <details>
 <summary>Where does a subagent's color come from?</summary>
 
-From `~/.claude/agent-colors.json`, which the `agent-color` script keeps: `agent-color "<description>"` prints the agent's color (`#rrggbb`), giving it the palette color least used in the last 24 hours when it has none, and forgets agents after 7 days. Run it when spawning an agent to use the same color elsewhere, such as in the chat. The status line only reads the file; an agent missing from it gets a color picked from its name. Install the script beside the status line:
+From `~/.claude/agent-colors.json`, which the `agent-color` script keeps: `agent-color "<description>"` prints the agent's color (`#rrggbb`), giving it the palette color least used in the last 24 hours when it has none, and forgets agents after 7 days. Run it when spawning an agent to use the same color elsewhere, such as in the chat. The status line only reads the file; an agent missing from it gets a color picked from its name. `install.sh` installs the script beside the status line; by hand:
 
 ```bash
 cp agent-color.js ~/.claude/hooks/agent-color && chmod +x ~/.claude/hooks/agent-color
