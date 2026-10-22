@@ -21,6 +21,7 @@ const ANSI_HEX = {
   '31': '#f85149',        // red
   '38;5;208': '#f0883e',  // orange
   '38;5;135': '#bc8cff',  // purple
+  '38;5;238': '#2d333b',  // the context bar's gray track (BAR_EMPTY_HEX)
   '2': '#7d8590'          // dim
 };
 const DEFAULT_HEX = '#c9d1d9';   // plain (no escape) text
@@ -46,6 +47,7 @@ function splitBar(text) {
 function ansiToRuns(line, { firstPlain } = {}) {
   const runs = [];
   let currentHex = null; // null = no color active (plain/default text)
+  let currentBold = false;
   let sawFirstPlain = false;
   let lastIndex = 0;
 
@@ -56,7 +58,7 @@ function ansiToRuns(line, { firstPlain } = {}) {
       runs.push({ text: bar[0], hex });
       runs.push({ text: bar[1], hex: BAR_EMPTY_HEX });
     } else {
-      runs.push({ text, hex });
+      runs.push({ text, hex, bold: currentBold });
     }
   };
 
@@ -90,7 +92,10 @@ function ansiToRuns(line, { firstPlain } = {}) {
   while ((match = re.exec(line)) !== null) {
     flush(match.index);
     const code = match[1];
-    if (code === '' || code === '0') currentHex = null;
+    const rgb = /^38;2;(\d+);(\d+);(\d+)$/.exec(code);
+    if (code === '' || code === '0') { currentHex = null; currentBold = false; }
+    else if (code === '1') currentBold = true;
+    else if (rgb) currentHex = '#' + rgb.slice(1).map(n => Number(n).toString(16).padStart(2, '0')).join('');
     else currentHex = ANSI_HEX[code] ?? currentHex;
     lastIndex = re.lastIndex;
   }
