@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code statusline: dir │ model │ context │ usage │ cost │ tokens │ task
+// Claude Code statusline: dir │ model │ context │ usage │ cost │ task
 // https://github.com/MithunWijayasiri/ctxline-claude
 
 const fs = require('fs');
@@ -14,7 +14,7 @@ const VERSION = '1.7.5';
 
 const IS_API_KEY = !!process.env.ANTHROPIC_API_KEY;
 
-// Segment opt-out: comma list. Recognized: branch, effort, cost, tokens, task, update, autoupdate, usage.
+// Segment opt-out: comma list. Recognized: branch, effort, cost, task, update, autoupdate, usage.
 // Disabling skips the work, not just the output; dir/model/context always render.
 // autoupdate: no self-install, the "available" row stays; update: no check at all.
 const DISABLED = new Set(
@@ -24,8 +24,11 @@ const DISABLED = new Set(
     .filter(Boolean)
 );
 
-// Context bar width in cells.
+// Context bar width in cells. Each cell is a 6-dot braille glyph filled one dot at a time, left
+// column top to bottom, then the right one, so the bar grows in 1/36 steps of the window.
 const BAR_WIDTH = 6;
+const BAR_CELLS = ['\u2800', '\u2801', '\u2803', '\u2807', '\u280f', '\u281f', '\u283f']; // ⠀⠁⠃⠇⠏⠟⠿
+const BAR_DOTS = BAR_CELLS.length - 1;
 
 // Branch names tail-truncated to this with "…", keeping leading ticket IDs visible.
 const MAX_BRANCH_LEN = 24;
@@ -64,18 +67,58 @@ const SEMVER_RE = /^\d+\.\d+\.\d+$/;       // releases only: a prerelease never 
 // Subagent mode reads only stdin (no fetch to race), so its read gets its own short cap.
 const SUBAGENT_TIMEOUT_MS = 500;
 
-// Token totals per agent, from Claude Code's transcripts (stdin transcript_path; a subagent's
-// is <session>/subagents/agent-<id>.jsonl). Read from where the last render stopped, the
-// offset and running totals kept per file; at most TOKENS_MAX_READ per render, so a first
-// read of a long transcript never stalls the line (it catches up over a few renders).
-const TOKENS_CACHE_DIR = path.join(CACHE_DIR, 'tokens');
-const TOKENS_MAX_READ = 16 * 1024 * 1024;
+// Each subagent's cost, from its transcript (<session>/subagents/agent-<id>.jsonl beside stdin's
+// transcript_path). Read from where the last render stopped, the offset and running total kept
+// per file; at most COST_MAX_READ per render, so a first read of a long transcript never stalls
+// the row (it catches up over a few renders).
+const COST_CACHE_DIR = path.join(CACHE_DIR, 'tokens');
+const COST_MAX_READ = 16 * 1024 * 1024;
+// Bumped when the state file's shape changes, so an older one is counted again from the start.
+const COST_STATE_VERSION = 2;
 // One reply is logged several times while it streams, the last record's usage the one that
-// counts: the latest message ids are kept so a later record replaces an earlier one's count.
-const TOKENS_RECENT_IDS = 64;
+// counts: the latest message ids are kept so a later record replaces an earlier one's cost.
+const COST_RECENT_IDS = 64;
 // A state file untouched this long belongs to a transcript no longer written to; it is deleted
 // when a new one is created (the only time the directory grows), so it never piles up.
-const TOKENS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const COST_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+// $ per million tokens, copied from Claude Code's model catalog (2.1.307) so a subagent's cost
+// is priced as the session's own cost.total_cost_usd is. Add a model here when one launches;
+// an unknown one is priced as DEFAULT_PRICE, as Claude Code does.
+const price = (input, output, cacheRead) => ({ in: input, out: output, w5m: input * 1.25, w1h: input * 2, read: cacheRead });
+const DEFAULT_PRICE = price(5, 25, 0.5);
+const MODEL_PRICES = {
+  'claude-3-5-haiku': price(0.8, 4, 0.08),
+  'claude-haiku-4-5': price(1, 5, 0.1),
+  'claude-haiku-5-5': { ...price(0.1, 0.5, 0.01), long: { above: 1e5, ...price(0.5, 2.5, 0.05) } },
+  'claude-3-5-sonnet': price(3, 15, 0.3),
+  'claude-3-7-sonnet': price(3, 15, 0.3),
+  'claude-sonnet-4-0': price(3, 15, 0.3),
+  'claude-sonnet-4-5': price(3, 15, 0.3),
+  'claude-sonnet-4-6': price(3, 15, 0.3),
+  'claude-sonnet-5': price(2, 10, 0.2),
+  'claude-sonnet-5-5': price(2, 10, 0.1),
+  'claude-opus-4-0': price(15, 75, 1.5),
+  'claude-opus-4-1': price(15, 75, 1.5),
+  'claude-opus-4-5': price(5, 25, 0.5),
+  'claude-opus-4-6': price(5, 25, 0.5),
+  'claude-opus-4-7': price(5, 25, 0.5),
+  'claude-opus-4-8': price(5, 25, 0.5),
+  'claude-opus-5': price(5, 25, 0.5),
+  'claude-opus-5-5': price(4, 20, 0.2),
+  'claude-fable-5': price(10, 50, 1),
+  'claude-fable-5-1': price(10, 50, 0.25),
+  'claude-mythos-5': price(10, 50, 1),
+  'claude-mythos-5-1': price(10, 50, 0.25)
+};
+// Fast mode (usage.speed "fast") has its own rates; other models keep their standard ones.
+const FAST_PRICES = {
+  'claude-opus-5-5': price(8, 40, 0.4),
+  'claude-opus-5': price(10, 50, 1),
+  'claude-opus-4-8': price(10, 50, 1),
+  'claude-opus-4-7': price(30, 150, 3),
+  'claude-opus-4-6': price(30, 150, 3)
+};
 
 // ANSI color codes
 const colors = {
@@ -228,10 +271,11 @@ function formatAheadBehind(ab) {
   return s;
 }
 
-// Colored "C<used> <bar>" (e.g. "C45 ███░░░"); shared by main line and subagent rows.
+// Colored "C<used> <bar>" (e.g. "C45 ⠿⠿⠟⠀⠀⠀"); shared by main line and subagent rows.
 function renderContextBar(used) {
-  const filled = Math.round((used / 100) * BAR_WIDTH);
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(BAR_WIDTH - filled);
+  const dots = Math.round((Math.max(0, Math.min(100, used)) / 100) * BAR_WIDTH * BAR_DOTS);
+  let bar = '';
+  for (let i = 0; i < BAR_WIDTH; i++) bar += BAR_CELLS[Math.max(0, Math.min(BAR_DOTS, dots - i * BAR_DOTS))];
 
   let color;
   if (used < 50) color = colors.green;
@@ -716,7 +760,7 @@ function getRawUsage(callback) {
 function getCostSegment(data) {
   const usd = data?.cost?.total_cost_usd;
   if (!Number.isFinite(usd)) return '';
-  return `${colors.dim}$${usd.toFixed(2)}${colors.reset}`;
+  return `${colors.dim}${formatUsd(usd)}${colors.reset}`;
 }
 
 function getCurrentTask(sessionId) {
@@ -744,25 +788,73 @@ function getCurrentTask(sessionId) {
 }
 
 // A transcript's state file: ~/.claude/cache/tokens/<sha1 of its path>.json.
-function tokensCacheFile(file) {
-  return path.join(TOKENS_CACHE_DIR, crypto.createHash('sha1').update(file).digest('hex') + '.json');
+function costCacheFile(file) {
+  return path.join(COST_CACHE_DIR, crypto.createHash('sha1').update(file).digest('hex') + '.json');
 }
 
-// Delete state files (and stray temp files) not written for TOKENS_MAX_AGE_MS. Best-effort: a
+// Delete state files (and stray temp files) not written for COST_MAX_AGE_MS. Best-effort: a
 // file another render is writing, or one already gone, is skipped.
-function pruneTokenStates(now = Date.now()) {
+function pruneCostStates(now = Date.now()) {
   try {
-    for (const name of fs.readdirSync(TOKENS_CACHE_DIR)) {
-      const file = path.join(TOKENS_CACHE_DIR, name);
+    for (const name of fs.readdirSync(COST_CACHE_DIR)) {
+      const file = path.join(COST_CACHE_DIR, name);
       try {
-        if (now - fs.statSync(file).mtimeMs > TOKENS_MAX_AGE_MS) fs.unlinkSync(file);
+        if (now - fs.statSync(file).mtimeMs > COST_MAX_AGE_MS) fs.unlinkSync(file);
       } catch (e) {}
     }
   } catch (e) {}
 }
 
-// One transcript line into the running state: assistant records only, each message id once.
-function addTokenLine(state, line, mainThread) {
+// Canonical catalog id of a model as transcripts and stdin name it: "claude-opus-5[1m]",
+// "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-opus-4-20250514" -> "claude-opus-4-0".
+function canonicalModel(id) {
+  const s = String(id || '').toLowerCase()
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/^((us|eu|apac|global|jp|au)\.)?(anthropic\.)?/, '')
+    .replace(/-v\d+:\d+$/, '')
+    .replace(/[@-]\d{8}$/, '');
+  return MODEL_PRICES[s] || !MODEL_PRICES[`${s}-0`] ? s : `${s}-0`;
+}
+
+// Dollars one API reply cost, as Claude Code prices it: the model's tier (fast-mode tier when
+// usage.speed is "fast"), Haiku 5.5's long-prompt rates past 100k prompt tokens, 1h cache
+// writes at their own rate, ×1.1 for US-only inference, and $0.01 per web search.
+function usageCost(model, usage) {
+  if (!usage) return 0;
+  const id = canonicalModel(model);
+  const fast = usage.speed === 'fast';
+  let p = (fast && FAST_PRICES[id]) || MODEL_PRICES[id] || DEFAULT_PRICE;
+  const input = usage.input_tokens || 0;
+  const read = usage.cache_read_input_tokens || 0;
+  const write = usage.cache_creation_input_tokens || 0;
+  const output = usage.output_tokens || 0;
+  if (p.long && input + read + write > p.long.above) p = p.long;
+  const write1h = Math.min(usage.cache_creation?.ephemeral_1h_input_tokens || 0, write);
+  const usd = (input * p.in + output * p.out + (write - write1h) * p.w5m + write1h * p.w1h + read * p.read) / 1e6;
+  return usd * (usage.inference_geo === 'us' ? 1.1 : 1) + (usage.server_tool_use?.web_search_requests || 0) * 0.01;
+}
+
+// Transcripts log a reply's usage as its stream starts: input and cache counts are final, but
+// output_tokens is only what was out by then (often under 20). What the reply wrote is in its
+// records, one content block each, so its output is at least that text, at ~4 characters a
+// token: text, tool inputs and thinking text (thinking the model kept hidden adds more, which
+// no transcript shows).
+const CHARS_PER_TOKEN = 4;
+
+function contentChars(content) {
+  let n = 0;
+  for (const c of Array.isArray(content) ? content : []) {
+    if (c?.type === 'text' && typeof c.text === 'string') n += c.text.length;
+    else if (c?.type === 'thinking' && typeof c.thinking === 'string') n += c.thinking.length;
+    else if (c?.type === 'tool_use' && c.input != null) n += JSON.stringify(c.input).length;
+  }
+  return n;
+}
+
+// One transcript line into the running state: assistant records only. A reply is logged once
+// per content block under one message id, so its cost is priced again as each record adds to
+// it (recent: [id, usd, chars, logged output]), replacing the cost counted before.
+function addCostLine(state, line) {
   if (!line.includes('"usage"') || !line.includes('"assistant"')) return;
   let d;
   try {
@@ -772,64 +864,58 @@ function addTokenLine(state, line, mainThread) {
   }
   const usage = d?.message?.usage;
   if (d.type !== 'assistant' || !usage) return;
-  // Older Claude Code versions logged subagents inside the session's own transcript.
-  if (mainThread && d.isSidechain) return;
   const id = d.message.id || d.requestId || d.uuid;
-  const now = [
-    usage.input_tokens || 0,
-    usage.cache_read_input_tokens || 0,
-    usage.cache_creation_input_tokens || 0,
-    usage.output_tokens || 0
-  ];
-  const seen = state.recent.find(r => r[0] === id);
-  const before = seen ? seen.slice(1) : [0, 0, 0, 0];
-  for (let k = 0; k < 4; k++) state.totals[k] += now[k] - before[k];
-  if (seen) {
-    seen.splice(1, 4, ...now);
-  } else {
-    state.recent.push([id, ...now]);
-    if (state.recent.length > TOKENS_RECENT_IDS) state.recent.shift();
+  let seen = state.recent.find(r => r[0] === id);
+  if (!seen) {
+    seen = [id, 0, 0, 0];
+    state.recent.push(seen);
+    if (state.recent.length > COST_RECENT_IDS) state.recent.shift();
   }
+  seen[2] += contentChars(d.message.content);
+  seen[3] = Math.max(seen[3], usage.output_tokens || 0);
+  const output = Math.max(seen[3], Math.ceil(seen[2] / CHARS_PER_TOKEN));
+  const now = usageCost(d.message.model, { ...usage, output_tokens: output });
+  if (!Number.isFinite(now)) return;
+  state.usd += now - seen[1];
+  seen[1] = now;
 }
 
-// { read, input, output, partial } for one transcript, or null. read = cache reads; input =
-// uncached input + cache writes (what the model read for the first time); output = output,
-// thinking included. Reads only what was appended since the last render; partial while a
-// long transcript is still being caught up on.
-function readTokenTotals(file, mainThread) {
+// { usd, partial } for one subagent transcript, or null. Reads only what was appended since
+// the last render; partial while a long transcript is still being caught up on.
+function readAgentCost(file) {
   if (typeof file !== 'string' || !file) return null;
   let fd;
   try {
     const stat = fs.statSync(file);
-    const cacheFile = tokensCacheFile(file);
+    const cacheFile = costCacheFile(file);
     let state = null;
     try {
       state = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     } catch (e) {}
-    // A replaced or truncated transcript is counted again from its start.
-    if (!state || state.ino !== stat.ino || !(state.offset <= stat.size) || !Array.isArray(state.totals) || !Array.isArray(state.recent)) {
-      state = { ino: stat.ino, offset: 0, totals: [0, 0, 0, 0], recent: [] };
+    // A replaced or truncated transcript, or a state file from an older format, starts over.
+    if (!state || state.v !== COST_STATE_VERSION || state.ino !== stat.ino || !(state.offset <= stat.size)
+      || !Number.isFinite(state.usd) || !Array.isArray(state.recent)) {
+      state = { v: COST_STATE_VERSION, ino: stat.ino, offset: 0, usd: 0, recent: [] };
     }
     if (state.offset < stat.size) {
       fd = fs.openSync(file, 'r');
-      const length = Math.min(stat.size - state.offset, TOKENS_MAX_READ);
+      const length = Math.min(stat.size - state.offset, COST_MAX_READ);
       const buf = Buffer.alloc(length);
       const got = fs.readSync(fd, buf, 0, length, state.offset);
-      // Whole lines only: the session may be mid-write on the last one.
+      // Whole lines only: the agent may be mid-write on the last one.
       const end = got > 0 ? buf.lastIndexOf(10, got - 1) : -1;
       if (end >= 0) {
-        for (const line of buf.toString('utf8', 0, end).split('\n')) addTokenLine(state, line, mainThread);
+        for (const line of buf.toString('utf8', 0, end).split('\n')) addCostLine(state, line);
         state.offset += end + 1;
-        fs.mkdirSync(TOKENS_CACHE_DIR, { recursive: true });
+        fs.mkdirSync(COST_CACHE_DIR, { recursive: true });
         const isNew = !fs.existsSync(cacheFile);
         const tmp = `${cacheFile}.${process.pid}.tmp`;
         fs.writeFileSync(tmp, JSON.stringify(state));
         fs.renameSync(tmp, cacheFile);
-        if (isNew) pruneTokenStates();
+        if (isNew) pruneCostStates();
       }
     }
-    const [input, read, write, output] = state.totals;
-    return { read, input: input + write, output, partial: stat.size - state.offset > TOKENS_MAX_READ / 64 };
+    return { usd: Math.max(0, state.usd), partial: stat.size - state.offset > COST_MAX_READ / 64 };
   } catch (e) {
     return null;
   } finally {
@@ -869,22 +955,16 @@ function subagentTranscript(transcriptPath, task) {
   }
 }
 
-// 999 -> "999", 1530 -> "1.5k", 12345 -> "12k", 2.41e9 -> "2.4B".
-function formatTokenCount(n) {
-  const units = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
-  for (const [size, unit] of units) {
-    if (n >= size) return (n / size).toFixed(n >= size * 10 ? 0 : 1) + unit;
-  }
-  return String(Math.round(n));
+// 0.4213 -> "$0.42", 1318.394 -> "$1318.39". Shared by the main line's cost and subagent rows.
+function formatUsd(usd) {
+  return `$${Math.max(0, usd).toFixed(2)}`;
 }
 
-// "R617M I7.0M O1.5M": cache reads, input not from the cache, output (labels dim); "…" while
-// still catching up; '' when absent or zero.
-function renderTokens(totals) {
-  if (!totals || !(totals.read + totals.input + totals.output > 0)) return '';
-  const part = (label, n) => `${colors.dim}${label}${colors.reset}${formatTokenCount(n)}`;
-  const body = [part('R', totals.read), part('I', totals.input), part('O', totals.output)].join(' ');
-  return totals.partial ? `${body}${colors.dim}…${colors.reset}` : body;
+// A subagent's "$0.42" (dim), with "…" while its transcript is still being caught up on; ''
+// when absent or nothing spent yet.
+function renderAgentCost(cost) {
+  if (!cost || !(cost.usd > 0)) return '';
+  return `${colors.dim}${formatUsd(cost.usd)}${cost.partial ? '…' : ''}${colors.reset}`;
 }
 
 // Visible (printable) width of a segment string: strip ANSI color codes, count code points.
@@ -904,8 +984,8 @@ function layout(line1Parts, line2Parts, cols) {
 }
 
 // Everything the render needs that touches fs/child_process/env (git, todos, update cache,
-// transcript tokens, COLUMNS), so renderStatusLine stays pure. Own try/catch: called outside
-// outputStatus's, and a malformed current_dir must still degrade to a renderable fallback.
+// COLUMNS), so renderStatusLine stays pure. Own try/catch: called outside outputStatus's, and a
+// malformed current_dir must still degrade to a renderable fallback.
 function collectFacts(data) {
   try {
     const dir = data?.workspace?.current_dir || process.cwd();
@@ -916,10 +996,9 @@ function collectFacts(data) {
     const task = DISABLED.has('task') ? '' : getCurrentTask(sessionId);
     const { update, updated } = DISABLED.has('update') ? { update: '', updated: null } : getUpdateFacts();
     const cols = parseInt(process.env.COLUMNS, 10);
-    const tokens = DISABLED.has('tokens') ? null : readTokenTotals(data?.transcript_path, true);
-    return { dirname, branch, sync, task, update, updated, cols, tokens };
+    return { dirname, branch, sync, task, update, updated, cols };
   } catch (e) {
-    return { dirname: '~', branch: '', sync: '', task: '', update: '', updated: null, cols: undefined, tokens: null };
+    return { dirname: '~', branch: '', sync: '', task: '', update: '', updated: null, cols: undefined };
   }
 }
 
@@ -959,8 +1038,6 @@ function renderStatusLine(data, facts, usage) {
   if (usage?.weekly) line2.push(usage.weekly);
   if (usage?.models?.length) line2.push(...usage.models);
   if (cost) line2.push(cost);
-  const tokens = renderTokens(facts.tokens);
-  if (tokens) line2.push(tokens);
   if (facts.task) line2.push(`${colors.dim}${facts.task}${colors.reset}`);
 
   const body = layout(line1, line2, facts.cols);
@@ -1058,11 +1135,13 @@ function formatElapsed(startTime) {
   return `${secs}s`;
 }
 
-// One subagentStatusLine row: "name │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ tokens".
-// Every segment past name is conditional on its source being present/finite. `tokens` is the
-// subagent's readTokenTotals(), read by emitSubagent; absent -> no tokens segment.
-function renderSubagentTask(t, tokens) {
-  const parts = [t.label || t.name || t.description || 'agent'];
+// One subagentStatusLine row: "name │ Model · effort │ C<used> <bar> │ ⏱ <elapsed> │ $<cost>".
+// name is the description the agent was spawned with ("Reply colors plugin"); `label` is its
+// live activity, used only when there is no description. Every segment past name is conditional
+// on its source being present/finite. `cost` is the subagent's readAgentCost(), read by
+// emitSubagent; absent -> no cost segment.
+function renderSubagentTask(t, cost) {
+  const parts = [t.description || t.name || t.label || 'agent'];
 
   const model = shortenModelId(t.model);
   // effort absent = subagent inherits the session effort; show model alone then.
@@ -1081,22 +1160,22 @@ function renderSubagentTask(t, tokens) {
   const elapsed = formatElapsed(t.startTime);
   if (elapsed) parts.push(`${colors.dim}⏱ ${elapsed}${colors.reset}`);
 
-  const tokenSegment = renderTokens(tokens);
-  if (tokenSegment) parts.push(tokenSegment);
+  const costSegment = renderAgentCost(cost);
+  if (costSegment) parts.push(costSegment);
 
   return parts.join(SEGMENT_SEP);
 }
 
 // subagentStatusLine mode: one {id, content} JSON line per task. No usage/git/todos work; the
-// one file read is each subagent's transcript for its tokens (skipped with CTXLINE_DISABLE=tokens).
+// one file read is each subagent's transcript for its cost (skipped with CTXLINE_DISABLE=cost).
 // Bad payload or a task that fails to render -> emit nothing (default rendering stays).
 function emitSubagent(data) {
   try {
     const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
-    const tokensOf = t => (DISABLED.has('tokens') ? null : readTokenTotals(subagentTranscript(data?.transcript_path, t), false));
+    const costOf = t => (DISABLED.has('cost') ? null : readAgentCost(subagentTranscript(data?.transcript_path, t)));
     const out = tasks
       .filter(t => t && t.id)
-      .map(t => JSON.stringify({ id: t.id, content: renderSubagentTask(t, tokensOf(t)) }))
+      .map(t => JSON.stringify({ id: t.id, content: renderSubagentTask(t, costOf(t)) }))
       .join('\n');
     if (out) {
       // Exit from the write callback: process.exit() would drop output queued behind backpressure.
@@ -1124,5 +1203,5 @@ if (require.main === module) {
     readStdinThen(timeoutMs, (input) => finish(parseInput(input)));
   }
 } else {
-  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
+  module.exports = { parseScopedLimits, parseUsagePayload, serializeUsageCache, normalizePercentage, readStdinThen, renderStatusLine, renderSubagentTask, renderContextBar, formatUsd, usageCost, addCostLine, compareVersions, parseRegistryVersion, isReleaseBody, VERSION };
 }

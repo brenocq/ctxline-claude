@@ -32,6 +32,7 @@ function extractLine(marker) {
 // incidental whitespace in the source markup.
 function htmlLineToText(html) {
   return html
+    .replace(/<span class="bar braille">([\s\S]*?)<\/span>/g, (_, inner) => ' ' + inner.trim())
     .replace(/<span class="bar">([\s\S]*?)<\/span>/g, (_, inner) => {
       const total = (inner.match(/<i/g) || []).length;
       const on = (inner.match(/<i class="on">/g) || []).length;
