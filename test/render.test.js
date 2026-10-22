@@ -1034,9 +1034,9 @@ test('update nudge: own row below the statusline, main line untouched', () => {
   assert.strictEqual(rows.length, 2, 'exactly one extra row');
   // The nudge is appended, never mixed into the statusline's own segments.
   assert.deepStrictEqual(rows[0].split(' │ ').slice(-2), ['$0.42', 'Refactoring']);
-  assert.strictEqual(rows[1], '⬆ 1.9.0 available · npx ctxline-claude@latest');
-  assert.ok(raw.includes(`${GREEN}⬆ 1.9.0`), 'arrow and version are green');
-  assert.ok(raw.includes(`${BOLD}npx ctxline-claude@latest`), 'command is bold — the copy-paste target');
+  assert.strictEqual(rows[1], '⬆ upstream 1.9.0 available · merge into breno-dev');
+  assert.ok(raw.includes(`${GREEN}⬆ upstream 1.9.0`), 'arrow and version are green');
+  assert.ok(raw.includes(`${BOLD}merge into breno-dev`), 'the action is bold');
 });
 
 test('update nudge: absent when facts carry no update', () => {
@@ -1056,7 +1056,7 @@ test('update nudge: rides along with the responsive wrap as a third row', () => 
 test('update nudge: a newer cached version renders; an older one does not', () => {
   const newer = freshHome();
   seedUpdateCache(newer, { latest: '99.0.0' });
-  assert.match(run(fixture(40), { home: newer }).clean, /⬆ 99\.0\.0 available · npx ctxline-claude@latest/);
+  assert.match(run(fixture(40), { home: newer }).clean, /⬆ upstream 99\.0\.0 available · merge into breno-dev/);
 
   const older = freshHome();
   seedUpdateCache(older, { latest: '0.0.1' });
@@ -1110,7 +1110,7 @@ test('updated row: shows on first render, stamps updatedShownAt, gone after 5s',
 test('updated row: ignored when the running VERSION is not the installed one', () => {
   const home = freshHome();
   seedUpdateCache(home, { latest: '99.0.0', updatedFrom: VERSION, updatedTo: '99.0.0', updatedShownAt: null });
-  assert.match(run(fixture(40), { home }).clean, /\n⬆ 99\.0\.0 available · npx ctxline-claude@latest$/);
+  assert.match(run(fixture(40), { home }).clean, /\n⬆ upstream 99\.0\.0 available · merge into breno-dev$/);
 });
 
 test('updated row: CTXLINE_DISABLE=update hides it', () => {

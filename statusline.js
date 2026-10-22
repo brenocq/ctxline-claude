@@ -1022,12 +1022,13 @@ function collectFacts(data) {
   }
 }
 
-// Own stdout row, not a segment: the copy-pasteable command is too wide to inline without
-// forcing a wrap. Appended after layout() so it never joins the wrap decision.
+// Own stdout row, not a segment: too wide to inline without forcing a wrap. Appended after
+// layout() so it never joins the wrap decision. The fork names the merge, not `npx`, which
+// would install upstream over it.
 function renderUpdateLine(latest) {
-  return `${colors.green}⬆ ${latest}${colors.reset} `
+  return `${colors.green}⬆ upstream ${latest}${colors.reset} `
     + `${colors.dim}available ·${colors.reset} `
-    + `${colors.bold}npx ${PACKAGE_NAME}@latest${colors.reset}`;
+    + `${colors.bold}merge into breno-dev${colors.reset}`;
 }
 
 function renderUpdatedLine({ from, to }) {

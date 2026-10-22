@@ -6,7 +6,7 @@ npm package `ctxline-claude` — single-file statusline for Claude Code:
 
 ```text
 dir ⎇ branch ↑N↓M │ model · effort │ C<used> <bar> │ H<pct> ↺ <reset> │ W<pct> ↺ <reset> │ <model-initial><pct> ↺ <reset> │ $<cost> │ task
-⬆ <latest> available · npx ctxline-claude@latest     (or, 5s after a self-install, which breno-dev never does: ⬆ ctxline updated <old> → <new>)
+⬆ upstream <latest> available · merge into breno-dev     (or, 5s after a self-install, which breno-dev never does: ⬆ ctxline updated <old> → <new>)
 ```
 
 `C` context (only segment with a bar), `H` 5-hour usage, `W` 7-day usage, `<model-initial>` model-scoped weekly limit, `$` session cost. Everything after `dir`/`model`/`C` is conditional — renders only when its source resolves. The `⬆` row is not a segment — appended below the layout only when a newer release is cached (nudge) or a self-install just landed (updated, `UPDATED_NOTICE_MS` 5s from first render).
